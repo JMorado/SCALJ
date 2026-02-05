@@ -12,5 +12,3 @@ nano my_config.yaml
 # 3. Run the workflow
 scalj run --config my_config.yaml
 ```
-# SCALJ
-# SCALJ
