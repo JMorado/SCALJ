@@ -204,3 +204,34 @@ def load_trajectory(
             box_vectors.append(box_vector)
 
     return coords, box_vectors
+
+
+def load_last_frame(
+    trajectory_path: Path,
+) -> tuple[openmm.unit.Quantity, openmm.unit.Quantity]:
+    """
+    Load the last frame from a trajectory file.
+
+    Args:
+        trajectory_path: Path to the trajectory file
+
+    Returns:
+        Tuple of (coords, box_vectors) as OpenMM quantities in Angstroms.
+    """
+    coords_list, box_vectors_list = load_trajectory(trajectory_path)
+
+    if not coords_list:
+        raise ValueError(f"No frames found in trajectory: {trajectory_path}")
+
+    # taking the last frame
+    last_coords = coords_list[-1]  # Tensor
+    last_box_vectors = box_vectors_list[-1]  # Tensor
+
+    # Convert to OpenMM Quantities (assuming Angstroms for smee tensors)
+    # Smee typically uses Angstroms for coordinates
+    coords_quantity = last_coords.detach().cpu().numpy() * openmm.unit.angstrom
+    box_vectors_quantity = (
+        last_box_vectors.detach().cpu().numpy() * openmm.unit.angstrom
+    )
+
+    return coords_quantity, box_vectors_quantity

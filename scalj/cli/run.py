@@ -15,6 +15,7 @@ from ..engine import (
     compute_energies_forces,
     create_scaled_dataset,
     generate_scale_factors,
+    load_last_frame,
     run_mlp_simulation,
     run_simulation,
     setup_mlp_simulation,
@@ -41,7 +42,6 @@ def run_workflow(args):
     print("scalj - LJ Parameter Fitting Workflow")
     print("=" * 80)
 
-    # Load configuration
     config_dict = load_config(args.config)
 
     # Override with command-line arguments
@@ -111,25 +111,49 @@ def run_workflow(args):
         print("=" * 80)
 
         # Step 1: Load or run simulation for this mixture
-        if system.trajectory_path:
+        effective_trajectory_path = (
+            system.trajectory_path or general_config.trajectory_path
+        )
+
+        if effective_trajectory_path:
             print(f"Loading existing trajectory for {system.name}...")
-            trajectory_path = Path(system.trajectory_path)
+            trajectory_path = Path(effective_trajectory_path)
             if not trajectory_path.exists():
                 raise FileNotFoundError(f"Trajectory file not found: {trajectory_path}")
+
+            coords, box_vectors = load_last_frame(trajectory_path)
+            print(f"   Loaded trajectory from: {trajectory_path}")
+
+            print("Setting up MLP simulation...")
+            print(f"   MLP name: {general_config.mlp_name}")
+            print(f"   MLP device: {simulation_config.mlp_device}")
+            mlp_simulation = setup_mlp_simulation(
+                system.tensor_system, general_config.mlp_name, simulation_config
+            )
         else:
             print(f"Running molecular dynamics simulation for {system.name}...")
+            print(f"   Platform: {simulation_config.platform}")
             print(f"   Temperature: {simulation_config.temperature}")
             print(f"   Pressure: {simulation_config.pressure}")
+            print(f"   Timestep: {simulation_config.timestep}")
+            print(
+                f"   Equilibration NVT steps: {simulation_config.n_equilibration_nvt_steps}"
+            )
+            print(
+                f"   Equilibration NPT steps: {simulation_config.n_equilibration_npt_steps}"
+            )
             print(f"   Production steps: {simulation_config.n_production_steps}")
 
             # Run simulation
             trajectory_path = output_dir / f"trajectory_{system.name}.dcd"
-            coords, box_vectors = run_simulation(
+            run_simulation(
                 system.tensor_system,
                 system.tensor_forcefield,
                 trajectory_path,
                 simulation_config,
             )
+            # Load the last frame to use as starting point for MLP simulation
+            coords, box_vectors = load_last_frame(trajectory_path)
 
             print("Running MLP simulation...")
             print(f"   MLP name: {general_config.mlp_name}")
@@ -159,7 +183,7 @@ def run_workflow(args):
         coords_scaled, box_vectors_scaled = create_scaled_dataset(
             system.tensor_system, coords_np, box_vectors_np, scale_factors
         )
-        print(f"   Generated {len(coords_scaled[0])} configurations")
+        print(f"   Generated/loaded {len(coords_scaled[0])} configurations")
 
         # Step 3: Compute ML potential energies and forces for this system
         print(f"\nComputing ML potential energies and forces for {system.name}...")
@@ -172,11 +196,12 @@ def run_workflow(args):
         plot_path = output_dir / f"energy_vs_scale_{system.name}.png"
         plots.plot_energy_vs_scale(
             scale_factors,
-            energies,
+            [energies],
             n_total_molecules,
             plot_path,
+            labels=[general_config.mlp_name],
+            lims=(0, 50),
         )
-
         # Create dataset entries using helper function
         smiles_str = ".".join([comp.smiles for comp in system.components])
 
@@ -221,7 +246,7 @@ def run_workflow(args):
         smiles_str = ".".join([comp.smiles for comp in system.components])
         all_topologies[smiles_str] = system.tensor_system
 
-    trainable = create_trainable(tensor_forcefield, parameter_config)
+    trainable = create_trainable(tensor_forcefield, parameter_config, training_config)
     final_params, energy_losses, force_losses = train_parameters(
         trainable, combined_dataset, all_topologies, training_config
     )
@@ -241,10 +266,11 @@ def run_workflow(args):
 
     energy_ref, energy_pred, forces_ref, forces_pred = predict(
         combined_dataset,
-        final_force_field,
+        final_force_field.to(training_config.device),
         all_topologies,
         reference=training_config.reference,
         normalize=training_config.normalize,
+        device=training_config.device,
     )
 
     # Plot parity
@@ -263,6 +289,12 @@ def run_workflow(args):
         "kcal/mol/Å",
         output_dir / "parity_forces.png",
     )
+
+    import matplotlib.pyplot as plt
+
+    plt.plot(energy_ref.detach().cpu().numpy())
+    plt.plot(energy_pred.detach().cpu().numpy())
+    plt.savefig(output_dir / "energy_vs_scale.png")
 
     # Save results
     results_path = output_dir / "results.yaml"

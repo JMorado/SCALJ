@@ -257,6 +257,9 @@ class GeneralConfig(BaseModel):
     output_dir: str = pydantic.Field(
         "output", description="Directory for output files."
     )
+    trajectory_path: str | None = pydantic.Field(
+        None, description="Global path to existing trajectory file (fallback)."
+    )
 
 
 class ParameterConfig(BaseModel):

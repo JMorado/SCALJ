@@ -15,6 +15,7 @@ from ..config import ParameterConfig, TrainingConfig
 def create_trainable(
     force_field: smee.TensorForceField,
     parameter_config: ParameterConfig,
+    training_config: TrainingConfig,
 ) -> descent.train.Trainable:
     """
     Create a trainable object for parameter optimization.
@@ -42,7 +43,9 @@ def create_trainable(
     vdw_potential.parameters.requires_grad = True
 
     trainable = descent.train.Trainable(
-        force_field=force_field, parameters={"vdW": vdw_parameter_config}, attributes={}
+        force_field=force_field.to(training_config.device),
+        parameters={"vdW": vdw_parameter_config},
+        attributes={},
     )
 
     return trainable
@@ -54,6 +57,7 @@ def predict(
     systems: dict[str, smee.TensorSystem],
     reference: typing.Literal["mean", "min", "none"] = "none",
     normalize: bool = True,
+    device: str = "cpu",
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Predict the relative energies [kcal/mol] and forces [kcal/mol/Å] of a dataset.
@@ -75,6 +79,8 @@ def predict(
         Whether to scale the relative energies by ``1/n_confs_i``    and the forces
         by ``1/n_confs_i * n_atoms_per_conf_i * 3)``. This is useful when
         wanting to compute the MSE per entry.
+    device : str, optional
+        The device to use for the prediction.
 
     Returns
     -------
@@ -87,25 +93,30 @@ def predict(
     forces_ref_all, forces_pred_all = [], []
     for entry in dataset:
         smiles = entry["smiles"]
-        energy_ref = entry["energy"]
-        forces_ref = entry["forces"].reshape(len(energy_ref), -1, 3)
+        energy_ref = entry["energy"].to(device)
+        forces_ref = (entry["forces"].reshape(len(energy_ref), -1, 3)).to(device)
 
         coords_flat = smee.utils.tensor_like(
             entry["coords"], force_field.potentials[0].parameters
         )
 
-        coords = (coords_flat.reshape(len(energy_ref), -1, 3)).requires_grad_(True)
+        coords = (
+            (coords_flat.reshape(len(energy_ref), -1, 3))
+            .to(device)
+            .requires_grad_(True)
+        )
 
         box_vectors_flat = smee.utils.tensor_like(
             entry["box_vectors"], force_field.potentials[0].parameters
         )
         box_vectors = (
             (box_vectors_flat.reshape(len(energy_ref), 3, 3))
+            .to(device)
             .detach()
             .requires_grad_(False)
         )
 
-        system = systems[smiles]
+        system = systems[smiles].to(device)
 
         energy_pred = torch.zeros_like(energy_ref)
         for i, (coord, box_vector) in tqdm(
@@ -140,8 +151,8 @@ def predict(
         scale_energy, scale_forces = 1.0, 1.0
 
         if normalize:
-            scale_energy = 1.0 / torch.tensor(energy_pred.numel())
-            scale_forces = 1.0 / torch.tensor(forces_pred.numel())
+            scale_energy = 1.0 / torch.tensor(energy_pred.numel(), device=device)
+            scale_forces = 1.0 / torch.tensor(forces_pred.numel(), device=device)
 
         energy_ref_all.append(scale_energy * (energy_ref - energy_ref_0))
         forces_ref_all.append(scale_forces * forces_ref.reshape(-1, 3))
@@ -228,11 +239,9 @@ def train_parameters(
     Returns
     -------
     tuple[list[float], list[float]]
-        Tuple of (energy_losses, force_losses) for each epoch
+        Tuple of (energy_losses, force_losses)
     """
-    print(trainable.to_values())
-    params = trainable.to_values()
-    params.requires_grad_(True)
+    params = trainable.to_values().to(config.device).detach().requires_grad_(True)
     optimizer = torch.optim.Adam([params], lr=config.learning_rate)
 
     energy_losses = []
@@ -244,12 +253,13 @@ def train_parameters(
         # Predict with current parameters
         energy_ref, energy_pred, forces_ref, forces_pred = predict(
             dataset,
-            trainable.to_force_field(
-                params.abs()
+            trainable.to_force_field(params.abs()).to(
+                config.device
             ),  # Note the absolute value, as the LJ parameters are positive
             systems,
             reference=config.reference,
             normalize=config.normalize,
+            device=config.device,
         )
 
         # Compute loss

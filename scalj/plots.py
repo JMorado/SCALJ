@@ -8,9 +8,11 @@ import numpy as np
 
 def plot_energy_vs_scale(
     scale_factors: list[float],
-    energies: np.ndarray,
+    energies_list: list[np.ndarray],
     n_molecules: int,
     output_path: Path,
+    labels: list[str] | None = None,
+    lims: tuple[float, float] | None = None,
 ):
     """
     Plot ML potential energies vs scale factor.
@@ -19,27 +21,49 @@ def plot_energy_vs_scale(
     ----------
     scale_factors : list[float]
         List of scale factors used.
-    energies : np.ndarray
-        Array of potential energies (kcal/mol).
+    energies_list : list[np.ndarray]
+        List of arrays of potential energies (kcal/mol).
     n_molecules : int
         Number of molecules for normalization.
     output_path : Path
         Path to save the plot.
+    labels : list[str] | None
+        List of labels for the legend.
+    lims : tuple[float, float] | None
+        Limits for the y-axis.
     """
     plt.figure(figsize=(8, 6))
 
-    # Normalize energies by subtracting min and dividing by n_molecules
-    # This matches the notebook implementation
-    normalized_energies = (energies - energies.min()) / n_molecules
+    # Define colors for multiple plots
+    colors = ["blue", "red", "green", "orange", "purple", "brown"]
 
-    plt.plot(
-        scale_factors, normalized_energies, marker="o", linestyle="-", color="blue"
-    )
+    if labels is None:
+        labels = [f"Set {i + 1}" for i in range(len(energies_list))]
 
-    plt.title("ML Potential Energies vs. Scale Factor")
+    for i, energies in enumerate(energies_list):
+        # Normalize energies by subtracting min and dividing by n_molecules
+        # This matches the notebook implementation
+        normalized_energies = (energies - energies.min()) / n_molecules
+
+        color = colors[i % len(colors)]
+        label = labels[i]
+
+        plt.plot(
+            scale_factors,
+            normalized_energies,
+            marker="o",
+            linestyle="-",
+            color=color,
+            label=label,
+        )
+
     plt.xlabel("Scale Factor")
-    plt.ylabel("Relative Potential Energy (kcal/mol/mol)")
+    plt.ylabel(r"Potential Energy [kcal.mol$^{-1}$.molecule$^{-1}$]")
     plt.grid(True, linestyle="--", alpha=0.7)
+    plt.legend()
+
+    if lims is not None:
+        plt.ylim(lims)
 
     # Save plot
     plt.savefig(output_path, dpi=300, bbox_inches="tight")
@@ -73,7 +97,7 @@ def plot_training_losses(
     plt.plot(epochs, energy_losses, label="Energy Loss", color="blue")
     plt.xlabel("Epoch")
     plt.ylabel("Loss")
-    plt.title("Energy Loss")
+    plt.title("Energy Loss [unitless]")
     plt.grid(True, linestyle="--", alpha=0.7)
     plt.legend()
 
@@ -82,7 +106,7 @@ def plot_training_losses(
     plt.plot(epochs, force_losses, label="Force Loss", color="red")
     plt.xlabel("Epoch")
     plt.ylabel("Loss")
-    plt.title("Force Loss")
+    plt.title("Force Loss [unitless]")
     plt.grid(True, linestyle="--", alpha=0.7)
     plt.legend()
 
