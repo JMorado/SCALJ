@@ -1,0 +1,78 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scalj"
+version = "0.1.0"
+description = "A package for fitting Lennard-Jones parameters via volume-scaled condensed-phase simulations."
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [
+    {name = "SCALJ Contributors"}
+]
+keywords = ["molecular dynamics", "machine learning", "force field", "MACE", "Lennard-Jones", "parameter fitting"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Chemistry",
+    "Topic :: Scientific/Engineering :: Physics",
+]
+
+dependencies = [
+    "torch>=2.0.0",
+    "numpy>=1.20.0",
+    "pydantic>=2.0.0",
+    "pydantic-units>=0.1.0",
+    "tqdm>=4.60.0",
+    "pyyaml>=6.0",
+    "openmm>=8.0.0",
+    "openff-toolkit>=0.14.0",
+    "smee>=0.1.0",
+    "datasets>=2.0.0",
+    "pyarrow>=10.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "black>=22.0.0",
+    "isort>=5.10.0",
+    "mypy>=0.950",
+    "ruff>=0.1.0",
+]
+
+[project.scripts]
+scalj = "scalj.cli.main:main"
+
+[project.urls]
+Homepage = "https://github.com/yourusername/scalj"
+Repository = "https://github.com/yourusername/scalj"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["scalj*"]
+exclude = ["examples*", "tests*"]
+
+[tool.black]
+line-length = 88
+target-version = ['py39', 'py310', 'py311', 'py312']
+
+[tool.isort]
+profile = "black"
+line_length = 88
+
+[tool.ruff]
+line-length = 88
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP"]
+ignore = []

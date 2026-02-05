@@ -1,0 +1,98 @@
+# SCALJ Configuration File
+# This is an example configuration showing all available options
+
+# General configuration
+general:
+  force_field_name: 'de-force-1.0.3.offxml'
+  mlp_name: 'mace-off24-medium'
+  output_dir: 'output'
+  
+  # Define one or more systems/mixtures
+  systems:
+    - name: 'methanol'
+      weight: 1.0
+      trajectory_path: null  # Optional: path to existing trajectory
+      components:
+        - smiles: '[C:1]([H:3])([H:4])([H:5])[O:2][H:6]'
+          nmol: 323
+
+# Molecular dynamics simulation parameters
+simulation:
+  # Simulation temperature (with units)
+  temperature: '300 K'
+  
+  # Simulation pressure (with units)
+  pressure: '1.0 atm'
+  
+  # Integration timestep (with units)
+  timestep: '1.0 fs'
+  
+  # Langevin friction coefficient (with units)
+  friction_coeff: '1.0 / ps'
+  
+  # Number of minimization steps (0 uses MinimizationConfig)
+  n_minimization_steps: 0
+  
+  # Number of NVT equilibration steps
+  n_nvt_steps: 50000
+  
+  # Number of NPT equilibration steps
+  n_npt_equilibration_steps: 50000
+  
+  # Number of production MD steps
+  n_production_steps: 1000000
+  
+  # Interval for saving trajectory frames
+  report_interval: 2000
+
+# Configuration scaling parameters
+scaling:
+  # Close-range scaling: [start, end, n_points]
+  close_range: [0.75, 0.9, 5]
+  
+  # Equilibrium-range scaling: [start, end, n_points]
+  equilibrium_range: [0.9, 1.1, 15]
+  
+  # Long-range scaling: [start, end, n_points]
+  long_range: [1.1, 2.0, 12]
+  
+  # Frequency for subsampling trajectory frames
+  subsample_frequency: 20
+
+# Training configuration
+training:
+  # Learning rate for optimizer
+  learning_rate: 0.01
+  
+  # Number of training epochs
+  n_epochs: 100
+  
+  # Device to use for training ('cuda' or 'cpu')
+  device: 'cuda'
+  
+  # Weight for energy loss term
+  energy_weight: 1.0
+  
+  # Weight for force loss term
+  force_weight: 1.0
+  
+  # Reference energy mode: 'mean', 'min', or 'none'
+  reference: 'none'
+  
+  # Whether to normalize losses by number of conformers/atoms
+  normalize: true
+
+# Trainable parameters configuration
+parameters:
+  # Parameter column names to train
+  cols: ['epsilon', 'r_min']
+  
+  # Scaling factors for each parameter
+  scales:
+    epsilon: 10.0
+    r_min: 1.0
+  
+  # (min, max) limits for each parameter (null means no limit)
+  limits:
+    epsilon: [null, null]
+    r_min: [0.0, null]

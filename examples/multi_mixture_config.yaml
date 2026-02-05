@@ -1,0 +1,75 @@
+# SCALJ Multi-Mixture Configuration Example
+# This configuration demonstrates how to optimize LJ parameters across multiple systems simultaneously
+
+# General configuration with multiple mixtures
+general:
+  force_field_name: 'de-force-1.0.3.offxml'
+  mlp_name: 'mace-off24-medium'
+  output_dir: 'output_multi_mixture'
+  
+  # Define multiple systems/mixtures to simulate and optimize
+  systems:
+    # Pure methanol system
+    - name: 'pure_methanol'
+      weight: 1.0
+      trajectory_path: null
+      components:
+        - smiles: '[C:1]([H:3])([H:4])([H:5])[O:2][H:6]'
+          nmol: 323
+    
+    # Pure water system
+    - name: 'pure_water'
+      weight: 1.0
+      trajectory_path: null
+      components:
+        - smiles: '[H:1][O:2][H:3]'
+          nmol: 500
+    
+    # 50/50 methanol-water mixture
+    - name: 'methanol_water_50_50'
+      weight: 2.0  # Higher weight prioritizes this mixture in optimization
+      trajectory_path: null
+      components:
+        - smiles: '[C:1]([H:3])([H:4])([H:5])[O:2][H:6]'
+          nmol: 162
+        - smiles: '[H:1][O:2][H:3]'
+          nmol: 250
+
+# Simulation parameters (shared across all systems)
+simulation:
+  temperature: '300 K'
+  pressure: '1.0 atm'
+  timestep: '1.0 fs'
+  friction_coeff: '1.0 / ps'
+  n_minimization_steps: 0
+  n_nvt_steps: 50000
+  n_npt_equilibration_steps: 50000
+  n_production_steps: 1000000
+  report_interval: 2000
+
+# Scaling parameters (shared across all systems)
+scaling:
+  close_range: [0.75, 0.9, 5]
+  equilibrium_range: [0.9, 1.1, 15]
+  long_range: [1.1, 2.0, 12]
+  subsample_frequency: 20
+
+# Training parameters (optimizes across all systems simultaneously)
+training:
+  learning_rate: 0.01
+  n_epochs: 100
+  device: 'cuda'
+  energy_weight: 1.0
+  force_weight: 1.0
+  reference: 'none'
+  normalize: true
+
+# Parameter configuration
+parameters:
+  cols: ['epsilon', 'r_min']
+  scales:
+    epsilon: 10.0
+    r_min: 1.0
+  limits:
+    epsilon: [null, null]
+    r_min: [0.0, null]

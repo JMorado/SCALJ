@@ -1,0 +1,2 @@
+[console_scripts]
+scalj = scalj.cli:main
