@@ -280,6 +280,10 @@ def run_workflow(args):
         lims=(0, 30),
     )
 
+    print("\n" + "=" * 80)
+    print("Training...")
+    print("=" * 80)
+
     final_params, energy_losses, force_losses = train_parameters(
         trainable, combined_dataset, all_topologies, training_config
     )
