@@ -9,7 +9,6 @@ import numpy as np
 def plot_energy_vs_scale(
     scale_factors: list[float],
     energies_list: list[np.ndarray],
-    n_molecules: int,
     output_path: Path,
     labels: list[str] | None = None,
     lims: tuple[float, float] | None = None,
@@ -23,8 +22,6 @@ def plot_energy_vs_scale(
         List of scale factors used.
     energies_list : list[np.ndarray]
         List of arrays of potential energies (kcal/mol).
-    n_molecules : int
-        Number of molecules for normalization.
     output_path : Path
         Path to save the plot.
     labels : list[str] | None
@@ -40,17 +37,26 @@ def plot_energy_vs_scale(
     if labels is None:
         labels = [f"Set {i + 1}" for i in range(len(energies_list))]
 
+    ref_normalized = None
+    if len(energies_list) > 0:
+        # Assuming the first one is reference
+        ref_normalized = energies_list[0] - energies_list[0].min()
+
     for i, energies in enumerate(energies_list):
-        # Normalize energies by subtracting min and dividing by n_molecules
-        # This matches the notebook implementation
-        normalized_energies = (energies - energies.min()) / n_molecules
+        # Subtract minimum energy to make relative energies
+        energies = energies - energies.min()
+
+        rmse_str = ""
+        if ref_normalized is not None:
+            rmse = np.sqrt(np.mean((energies - ref_normalized) ** 2))
+            rmse_str = f" (RMSE: {rmse:.4f})"
 
         color = colors[i % len(colors)]
-        label = labels[i]
+        label = f"{labels[i]}{rmse_str}"
 
         plt.plot(
             scale_factors,
-            normalized_energies,
+            energies,
             marker="o",
             linestyle="-",
             color=color,
@@ -58,7 +64,7 @@ def plot_energy_vs_scale(
         )
 
     plt.xlabel("Scale Factor")
-    plt.ylabel(r"Potential Energy [kcal.mol$^{-1}$.molecule$^{-1}$]")
+    plt.ylabel(r"Potential Energy [kcal.mol$^{-1}$]")
     plt.grid(True, linestyle="--", alpha=0.7)
     plt.legend()
 

@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import descent.utils.reporting
 import openmm
 import smee
 import smee.converters
@@ -18,6 +19,7 @@ from ..engine import (
     load_last_frame,
     run_mlp_simulation,
     run_simulation,
+    run_thermo_benchmark,
     setup_mlp_simulation,
 )
 from ..fitting import (
@@ -191,17 +193,6 @@ def run_workflow(args):
             mlp_simulation, coords_scaled, box_vectors_scaled
         )
 
-        # Plot energy vs scale
-        n_total_molecules = sum(c.nmol for c in system.components)
-        plot_path = output_dir / f"energy_vs_scale_{system.name}.png"
-        plots.plot_energy_vs_scale(
-            scale_factors,
-            [energies],
-            n_total_molecules,
-            plot_path,
-            labels=[general_config.mlp_name],
-            lims=(0, 50),
-        )
         # Create dataset entries using helper function
         smiles_str = ".".join([comp.smiles for comp in system.components])
 
@@ -213,7 +204,6 @@ def run_workflow(args):
             energies=energies,
             forces=forces,
         )
-
         # Create dataset from entries
         system_dataset = ds.create_dataset(entries)
         systems_ds[system.name] = system_dataset
@@ -247,30 +237,22 @@ def run_workflow(args):
         all_topologies[smiles_str] = system.tensor_system
 
     trainable = create_trainable(tensor_forcefield, parameter_config, training_config)
-    final_params, energy_losses, force_losses = train_parameters(
-        trainable, combined_dataset, all_topologies, training_config
+    initial_force_field = trainable.to_force_field(trainable.to_values())
+    print("\n" + "=" * 80)
+    print("Initial parameters...")
+    print("=" * 80)
+    descent.utils.reporting.print_potential_summary(
+        initial_force_field.potentials_by_type["vdW"]
     )
 
-    # Plot training losses
-    loss_plot_path = output_dir / "training_losses.png"
-    plots.plot_training_losses(energy_losses, force_losses, loss_plot_path)
-
-    # Final evaluation on combined dataset
-    print("\n" + "=" * 80)
-    print("Evaluating final parameters...")
-    print("=" * 80)
-
-    final_force_field = trainable.to_force_field(final_params)
-
-    print(final_params)
-
-    energy_ref, energy_pred, forces_ref, forces_pred = predict(
+    energy_ref, energy_pred, forces_ref, forces_pred, _, _, mask_idx = predict(
         combined_dataset,
-        final_force_field.to(training_config.device),
+        initial_force_field,
         all_topologies,
         reference=training_config.reference,
-        normalize=training_config.normalize,
+        normalize=False,
         device=training_config.device,
+        energy_cutoff=training_config.energy_cutoff,
     )
 
     # Plot parity
@@ -279,7 +261,7 @@ def run_workflow(args):
         energy_pred.detach().cpu().numpy(),
         "Energy",
         "kcal/mol",
-        output_dir / "parity_energy.png",
+        output_dir / "parity_energy_initial.png",
     )
 
     plots.plot_parity(
@@ -287,18 +269,104 @@ def run_workflow(args):
         forces_pred.flatten().detach().cpu().numpy(),
         "Forces",
         "kcal/mol/Å",
-        output_dir / "parity_forces.png",
+        output_dir / "parity_forces_initial.png",
     )
 
-    import matplotlib.pyplot as plt
+    plots.plot_energy_vs_scale(
+        scale_factors[mask_idx.detach().cpu().numpy()],
+        [energy_ref.detach().cpu().numpy(), energy_pred.detach().cpu().numpy()],
+        output_dir / "energy_vs_scale_initial.png",
+        labels=["Reference", "Optimized"],
+        lims=(0, 30),
+    )
 
-    plt.plot(energy_ref.detach().cpu().numpy())
-    plt.plot(energy_pred.detach().cpu().numpy())
-    plt.savefig(output_dir / "energy_vs_scale.png")
+    final_params, energy_losses, force_losses = train_parameters(
+        trainable, combined_dataset, all_topologies, training_config
+    )
+
+    # Plot training losses
+    loss_plot_path = output_dir / "training_losses.png"
+    plots.plot_training_losses(energy_losses, force_losses, loss_plot_path)
+
+    print("\n" + "=" * 80)
+    print("Final parameters...")
+    print("=" * 80)
+    final_force_field = trainable.to_force_field(final_params)
+    descent.utils.reporting.print_potential_summary(
+        final_force_field.potentials_by_type["vdW"]
+    )
+
+    # Final evaluation on combined dataset
+    print("\n" + "=" * 80)
+    print("Evaluating final parameters...")
+    print("=" * 80)
+
+    energy_ref, energy_pred, forces_ref, forces_pred, _, _, mask_idx = predict(
+        combined_dataset,
+        final_force_field.to(training_config.device),
+        all_topologies,
+        reference=training_config.reference,
+        normalize=False,
+        device=training_config.device,
+        energy_cutoff=training_config.energy_cutoff,
+    )
+
+    # Plot parity
+    plots.plot_parity(
+        energy_ref.detach().cpu().numpy(),
+        energy_pred.detach().cpu().numpy(),
+        "Energy",
+        "kcal/mol",
+        output_dir / "parity_energy_final.png",
+    )
+
+    plots.plot_parity(
+        forces_ref.flatten().detach().cpu().numpy(),
+        forces_pred.flatten().detach().cpu().numpy(),
+        "Forces",
+        "kcal/mol/Å",
+        output_dir / "parity_forces_final.png",
+    )
+
+    plots.plot_energy_vs_scale(
+        scale_factors[mask_idx.detach().cpu().numpy()],
+        [energy_ref.detach().cpu().numpy(), energy_pred.detach().cpu().numpy()],
+        output_dir / "energy_vs_scale_final.png",
+        labels=["Reference", "Predicted"],
+        lims=(0, 30),
+    )
+
+    # Run thermodynamic benchmark
+    print("\n" + "=" * 80)
+    print("Running thermodynamic benchmark...")
+    print("=" * 80)
+    for system in general_config.systems:
+        smiles_str = ".".join([comp.smiles for comp in system.components])
+        results_final = run_thermo_benchmark(
+            smiles_str,
+            trainable,
+            all_topologies[smiles_str].topologies,
+            final_params,
+        )
+
+        import numpy as np
+
+        dens_list = []
+        hvap_list = []
+        for result in results_final:
+            dens_list.append(result[2][0].detach().numpy())
+            hvap_list.append(result[2][1].detach().numpy() * 4.184)
+        avg_density = np.mean(dens_list)
+        avg_hvap = np.mean(hvap_list)
+        std_density = np.std(dens_list)
+        std_hvap = np.std(hvap_list)
+
+        print(f"Density: {avg_density} ± {std_density} g/mL")
+        print(f"Hvap: {avg_hvap} ± {std_hvap} kcal/mol")
 
     # Save results
-    results_path = output_dir / "results.yaml"
-    print(f"\nSaving results to: {results_path}")
+    # results_path = output_dir / "results.yaml"
+    # print(f"\nSaving results to: {results_path}")
 
     print("\n" + "=" * 80)
     print("Workflow completed successfully!")

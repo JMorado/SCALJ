@@ -4,6 +4,7 @@ import typing
 
 import datasets
 import descent.train
+import openmm
 import smee
 import smee.utils
 import torch
@@ -57,10 +58,15 @@ def predict(
     systems: dict[str, smee.TensorSystem],
     reference: typing.Literal["mean", "min", "none"] = "none",
     normalize: bool = True,
+    energy_cutoff: float | None = None,
+    weighting_method: typing.Literal["uniform", "boltzmann"] = "uniform",
+    weighting_temperature: float = 298.15,
     device: str = "cpu",
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple[
+    torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
+]:
     """
-    Predict the relative energies [kcal/mol] and forces [kcal/mol/Å] of a dataset.
+    Predict the relative energies per molecule [kcal/mol] and forces [kcal/mol/Å] of a dataset.
 
     Parameters
     -----------
@@ -79,18 +85,27 @@ def predict(
         Whether to scale the relative energies by ``1/n_confs_i``    and the forces
         by ``1/n_confs_i * n_atoms_per_conf_i * 3)``. This is useful when
         wanting to compute the MSE per entry.
+    energy_cutoff : float, optional
+        Energy cutoff in kcal/mol to filter high-energy conformers.
+    weighting_method : typing.Literal["uniform", "boltzmann"], optional
+        Method to weight conformers in loss function.
+    weighting_temperature : float, optional
+        Temperature in Kelvin for Boltzmann weighting.
     device : str, optional
         The device to use for the prediction.
 
     Returns
     -------
-        tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
-            The predicted and reference relative energies [kcal/mol] with
-            ``shape=(n_confs,)``, and predicted and reference forces [kcal/mol/Å]
-            with ``shape=(n_confs * n_atoms_per_conf, 3)``.
+        tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+            The predicted and reference relative energies [kcal/mol],
+            predicted and reference forces [kcal/mol/Å], weights for energies,
+            and weights for forces.
     """
     energy_ref_all, energy_pred_all = [], []
     forces_ref_all, forces_pred_all = [], []
+    weights_all = []
+    weights_forces_all = []
+
     for entry in dataset:
         smiles = entry["smiles"]
         energy_ref = entry["energy"].to(device)
@@ -135,6 +150,12 @@ def predict(
             allow_unused=False,
         )[0]
 
+        # Normalize energies by the number of molecules
+        n_mols = sum(system.n_copies)
+        energy_ref = energy_ref / n_mols
+        energy_pred = energy_pred / n_mols
+
+        # Determine reference energy offset
         if reference.lower() == "mean":
             energy_ref_0 = energy_ref.mean()
             energy_pred_0 = energy_pred.mean()
@@ -148,17 +169,60 @@ def predict(
         else:
             raise NotImplementedError(f"invalid reference energy {reference}")
 
+        # Filtering mask
+        mask = torch.ones_like(energy_ref, dtype=torch.bool)
+        if energy_cutoff is not None:
+            # We filter based on reference energy relative to its minimum
+            # Note that we already normalize by the number molecules so that the
+            # energy cutoff is physically meaningful
+            energy_ref_min = energy_ref.min()
+            mask = (energy_ref - energy_ref_min) <= energy_cutoff
+
+        # Apply weights
+        weights = torch.ones_like(energy_ref)
+        if weighting_method == "boltzmann":
+            kBT = (
+                openmm.unit.AVOGADRO_CONSTANT_NA
+                * openmm.unit.BOLTZMANN_CONSTANT_kB
+                * weighting_temperature
+            ).value_in_unit(openmm.unit.kilocalories_per_mole)
+            e_rel = energy_ref - energy_ref.min()
+            weights = torch.exp(-e_rel / kBT)
+
+        # Apply mask to everything
+        mask_idx = torch.where(mask)[0]
+
+        energy_ref_masked = energy_ref[mask_idx]
+        energy_pred_masked = energy_pred[mask_idx]
+
+        forces_ref_masked = forces_ref[mask_idx]
+        forces_pred_masked = forces_pred[mask_idx]
+        weights_masked = weights[mask_idx]
+
+        # Expand weights for forces: (n_confs,) -> (n_confs * n_atoms,)
+        # forces_ref has shape (n_confs, n_atoms, 3)
+        n_atoms = forces_ref.shape[1]
+        weights_forces_masked = weights_masked.repeat_interleave(n_atoms)
+
         scale_energy, scale_forces = 1.0, 1.0
 
         if normalize:
-            scale_energy = 1.0 / torch.tensor(energy_pred.numel(), device=device)
-            scale_forces = 1.0 / torch.tensor(forces_pred.numel(), device=device)
+            n_confs = len(mask_idx)
+            if n_confs > 0:
+                scale_energy = 1.0 / energy_ref_masked.numel()
+                scale_forces = 1.0 / forces_ref_masked.numel()
 
-        energy_ref_all.append(scale_energy * (energy_ref - energy_ref_0))
-        forces_ref_all.append(scale_forces * forces_ref.reshape(-1, 3))
+        energy_ref_all.append(scale_energy * (energy_ref_masked - energy_ref_0))
+        forces_ref_all.append(scale_forces * forces_ref_masked.reshape(-1, 3))
 
-        energy_pred_all.append(scale_energy * (energy_pred - energy_pred_0))
-        forces_pred_all.append(scale_forces * forces_pred.reshape(-1, 3))
+        energy_pred_all.append(scale_energy * (energy_pred_masked - energy_pred_0))
+        forces_pred_all.append(scale_forces * forces_pred_masked.reshape(-1, 3))
+
+        weights_all.append(weights_masked)
+        weights_forces_all.append(weights_forces_masked)
+
+    if not energy_pred_all:
+        raise ValueError("No valid conformers found after filtering")
 
     energy_pred_all = torch.cat(energy_pred_all)
     forces_pred_all = torch.cat(forces_pred_all)
@@ -169,11 +233,30 @@ def predict(
     forces_ref_all = torch.cat(forces_ref_all)
     forces_ref_all = smee.utils.tensor_like(forces_ref_all, forces_pred_all)
 
+    weights_all = torch.cat(weights_all)
+    weights_all = smee.utils.tensor_like(weights_all, energy_pred_all)
+
+    weights_forces_all = torch.cat(weights_forces_all)
+    weights_forces_all = weights_forces_all.unsqueeze(1)
+    weights_forces_all = smee.utils.tensor_like(weights_forces_all, forces_pred_all)
+
+    # Normalize weights
+    weights_energy_sum = weights_all.sum()
+    if weights_energy_sum > 0:
+        weights_all = weights_all / weights_energy_sum
+
+    weights_forces_sum = weights_forces_all.sum()
+    if weights_forces_sum > 0:
+        weights_forces_all = weights_forces_all / weights_forces_sum
+
     return (
         energy_ref_all,
         energy_pred_all,
         forces_ref_all,
         forces_pred_all,
+        weights_all,
+        weights_forces_all,
+        mask_idx,
     )
 
 
@@ -182,6 +265,8 @@ def _compute_loss(
     energy_pred: torch.Tensor,
     forces_ref: torch.Tensor,
     forces_pred: torch.Tensor,
+    weights_energy: torch.Tensor | None = None,
+    weights_forces: torch.Tensor | None = None,
     energy_weight: float = 1.0,
     force_weight: float = 1.0,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -198,6 +283,10 @@ def _compute_loss(
         Reference forces
     forces_pred : torch.Tensor
         Predicted forces
+    weights_energy : torch.Tensor, optional
+        Weights for each energy point, by default None (all 1.0)
+    weights_forces : torch.Tensor, optional
+        Weights for each force component, by default None (all 1.0)
     energy_weight : float, optional
         Weight for energy loss, by default 1.0
     force_weight : float, optional
@@ -208,8 +297,19 @@ def _compute_loss(
     tuple[torch.Tensor, torch.Tensor, torch.Tensor]
         Tuple of (total_loss, energy_loss, force_loss)
     """
-    energy_loss = torch.mean((energy_pred - energy_ref) ** 2)
-    force_loss = torch.mean((forces_pred - forces_ref) ** 2)
+    if weights_energy is None:
+        weights_energy = torch.ones_like(energy_ref)
+
+    if weights_forces is None:
+        weights_forces = torch.ones_like(forces_ref)
+
+    energy_loss = torch.mean(
+        weights_energy * (energy_pred - energy_ref) ** 2
+    ) / torch.var(energy_ref)
+
+    force_loss = torch.mean(
+        weights_forces * (forces_pred - forces_ref) ** 2
+    ) / torch.var(forces_ref)
 
     total_loss = energy_weight * energy_loss + force_weight * force_loss
 
@@ -242,7 +342,11 @@ def train_parameters(
         Tuple of (energy_losses, force_losses)
     """
     params = trainable.to_values().to(config.device).detach().requires_grad_(True)
-    optimizer = torch.optim.Adam([params], lr=config.learning_rate)
+    eps = 0.1
+    with torch.no_grad():
+        params += torch.empty_like(params).uniform_(-eps, eps).abs()
+
+    optimizer = torch.optim.Adam([params], lr=config.learning_rate, amsgrad=True)
 
     energy_losses = []
     force_losses = []
@@ -251,7 +355,15 @@ def train_parameters(
         optimizer.zero_grad()
 
         # Predict with current parameters
-        energy_ref, energy_pred, forces_ref, forces_pred = predict(
+        (
+            energy_ref,
+            energy_pred,
+            forces_ref,
+            forces_pred,
+            weights_energy,
+            weights_forces,
+            mask_idx,
+        ) = predict(
             dataset,
             trainable.to_force_field(params.abs()).to(
                 config.device
@@ -259,6 +371,9 @@ def train_parameters(
             systems,
             reference=config.reference,
             normalize=config.normalize,
+            energy_cutoff=config.energy_cutoff,
+            weighting_method=config.weighting_method,
+            weighting_temperature=config.weighting_temperature,
             device=config.device,
         )
 
@@ -268,6 +383,8 @@ def train_parameters(
             energy_pred,
             forces_ref,
             forces_pred,
+            weights_energy=weights_energy,
+            weights_forces=weights_forces,
             energy_weight=config.energy_weight,
             force_weight=config.force_weight,
         )
@@ -286,4 +403,4 @@ def train_parameters(
                 f"loss_forces = {force_loss.item():.4e}"
             )
 
-    return params, energy_losses, force_losses
+    return params.abs(), energy_losses, force_losses

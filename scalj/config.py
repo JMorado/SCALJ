@@ -170,6 +170,16 @@ class TrainingConfig(BaseModel):
     normalize: bool = pydantic.Field(
         True, description="Whether to normalize losses by number of conformers/atoms."
     )
+    energy_cutoff: float | None = pydantic.Field(
+        None, description="Energy cutoff in kcal/mol to filter high-energy conformers."
+    )
+    weighting_method: Literal["uniform", "boltzmann"] = pydantic.Field(
+        "uniform", description="Method to weight conformers in loss function."
+    )
+    weighting_temperature: OpenMMQuantity[_KELVIN] = pydantic.Field(
+        300.0 * _KELVIN,
+        description="Temperature in Kelvin for Boltzmann weighting.",
+    )
 
 
 class MoleculeComponent(BaseModel):
