@@ -113,9 +113,7 @@ def run_workflow(args):
         print("=" * 80)
 
         # Step 1: Load or run simulation for this mixture
-        input_trajectory_path = (
-            system.trajectory_path or general_config.trajectory_path
-        )
+        input_trajectory_path = system.trajectory_path or general_config.trajectory_path
 
         if input_trajectory_path:
             print(f"Loading existing trajectory for {system.name}...")

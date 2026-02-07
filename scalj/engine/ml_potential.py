@@ -35,7 +35,7 @@ def setup_mlp_simulation(tensor_system, mlp_name, simulation_config):
     # Create MLP and convert topology
     mlp = MLPotential(mlp_name)
     omm_topology = smee.converters.convert_to_openmm_topology(tensor_system)
-    
+
     # Random box vectors, so that the simulation is periodic
     omm_topology.setPeriodicBoxVectors(np.eye(3) * 10 * openmm.unit.angstrom)
 
@@ -102,4 +102,3 @@ def compute_energies_forces(
         print(energies)
 
     return np.array(energies), np.array(forces)
-

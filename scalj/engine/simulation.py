@@ -227,6 +227,8 @@ def load_last_frame(
     last_box_vectors = box_vectors_list[-1]
 
     coords_quantity = last_coords.detach().cpu().numpy() * openmm.unit.angstrom
-    box_vectors_quantity = last_box_vectors.detach().cpu().numpy() * openmm.unit.angstrom
+    box_vectors_quantity = (
+        last_box_vectors.detach().cpu().numpy() * openmm.unit.angstrom
+    )
 
     return coords_quantity, box_vectors_quantity
