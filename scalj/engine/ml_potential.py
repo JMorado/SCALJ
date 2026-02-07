@@ -86,8 +86,6 @@ def compute_energies_forces(
         total=len(coords),
         desc="Computing ML energies/forces",
     ):
-        print("coord", coord)
-        print("box_vector", box_vector)
         mlp_simulation.context.setPositions(coord * openmm.unit.angstrom)
         mlp_simulation.context.setPeriodicBoxVectors(*box_vector * openmm.unit.angstrom)
         state = mlp_simulation.context.getState(getEnergy=True, getForces=True)
@@ -99,6 +97,5 @@ def compute_energies_forces(
         )
         energies.append(energy)
         forces.append(force)
-        print(energies)
 
     return np.array(energies), np.array(forces)
