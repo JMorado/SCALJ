@@ -113,13 +113,13 @@ def run_workflow(args):
         print("=" * 80)
 
         # Step 1: Load or run simulation for this mixture
-        effective_trajectory_path = (
+        input_trajectory_path = (
             system.trajectory_path or general_config.trajectory_path
         )
 
-        if effective_trajectory_path:
+        if input_trajectory_path:
             print(f"Loading existing trajectory for {system.name}...")
-            trajectory_path = Path(effective_trajectory_path)
+            trajectory_path = Path(input_trajectory_path)
             if not trajectory_path.exists():
                 raise FileNotFoundError(f"Trajectory file not found: {trajectory_path}")
 
@@ -185,7 +185,8 @@ def run_workflow(args):
         coords_scaled, box_vectors_scaled = create_scaled_dataset(
             system.tensor_system, coords_np, box_vectors_np, scale_factors
         )
-        print(f"   Generated/loaded {len(coords_scaled[0])} configurations")
+
+        print(f"   Generated {len(coords_scaled)} scaled configurations")
 
         # Step 3: Compute ML potential energies and forces for this system
         print(f"\nComputing ML potential energies and forces for {system.name}...")

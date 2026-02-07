@@ -10,7 +10,7 @@ def run_thermo_benchmark(
     trainable,
     topologies: list,
     parameters: torch.Tensor | None = None,
-    n_replicas: int = 1,
+    n_replicas: int = 3,
     output_dir: Path = Path("./predictions"),
     cache_dir: Path = Path("./cache"),
     density_ref: float = 0.79,
@@ -51,10 +51,6 @@ def run_thermo_benchmark(
     if parameters is not None:
         force_field = trainable.to_force_field(parameters).to("cpu")
     else:
-        # If parameters not provided, use default from trainable
-        # Assuming to_force_field can be called without args or we prefer to_force_field(trainable.to_values())
-        # descent.train.Trainable.to_force_field typically takes parameters.
-        # If we want current params:
         force_field = trainable.to_force_field(trainable.to_values()).to("cpu")
 
     for n in range(n_replicas):
@@ -87,9 +83,6 @@ def run_thermo_benchmark(
         }
 
         dataset = descent.targets.thermo.create_dataset(density_pure, hvap)
-
-        # Ensure output directory is unique per replica or handled by predict?
-        # The snippet used one dir. We'll use the passed dir.
 
         results = descent.targets.thermo.predict(
             dataset,

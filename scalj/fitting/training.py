@@ -342,11 +342,13 @@ def train_parameters(
         Tuple of (energy_losses, force_losses)
     """
     params = trainable.to_values().to(config.device).detach().requires_grad_(True)
-    eps = 0.1
-    with torch.no_grad():
-        params += torch.empty_like(params).uniform_(-eps, eps).abs()
 
-    optimizer = torch.optim.Adam([params], lr=config.learning_rate, amsgrad=True)
+    # Initially perturb the parameters
+    eps = 0.2
+    with torch.no_grad():
+        params += torch.empty_like(params).uniform_(-eps, eps)
+
+    optimizer = torch.optim.Adam([params], lr=config.learning_rate, amsgrad=False)
 
     energy_losses = []
     force_losses = []
