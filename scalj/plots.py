@@ -100,21 +100,17 @@ def plot_training_losses(
 
     # Plot energy loss
     plt.subplot(1, 2, 1)
-    plt.plot(epochs, energy_losses, label="Energy Loss", color="blue")
+    plt.plot(epochs, energy_losses, color="blue")
     plt.xlabel("Epoch")
-    plt.ylabel("Loss")
-    plt.title("Energy Loss [unitless]")
+    plt.ylabel("Energy Loss [unitless]")
     plt.grid(True, linestyle="--", alpha=0.7)
-    plt.legend()
 
     # Plot force loss
     plt.subplot(1, 2, 2)
-    plt.plot(epochs, force_losses, label="Force Loss", color="red")
+    plt.plot(epochs, force_losses, color="red")
     plt.xlabel("Epoch")
-    plt.ylabel("Loss")
-    plt.title("Force Loss [unitless]")
+    plt.ylabel("Force Loss [unitless]")
     plt.grid(True, linestyle="--", alpha=0.7)
-    plt.legend()
 
     plt.tight_layout()
     plt.savefig(output_path, dpi=300, bbox_inches="tight")

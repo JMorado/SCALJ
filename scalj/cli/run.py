@@ -152,22 +152,24 @@ def run_workflow(args):
                 trajectory_path,
                 simulation_config,
             )
+            print(f"   Trajectory saved to: {trajectory_path}")
             # Load the last frame to use as starting point for MLP simulation
             coords, box_vectors = load_last_frame(trajectory_path)
 
-            print("Running MLP simulation...")
-            print(f"   MLP name: {general_config.mlp_name}")
-            print(f"   Steps: {simulation_config.n_mlp_steps}")
-            print(f"   MLP device: {simulation_config.mlp_device}")
-            mlp_simulation = setup_mlp_simulation(
-                system.tensor_system, general_config.mlp_name, simulation_config
-            )
-            if simulation_config.n_mlp_steps > 0:
-                coords, box_vectors, mlp_simulation = run_mlp_simulation(
-                    mlp_simulation, coords, box_vectors, simulation_config
-                )
+        print("Creating MLP simulation...")
+        print(f"   MLP name: {general_config.mlp_name}")
+        print(f"   MLP device: {simulation_config.mlp_device}")
+        mlp_simulation = setup_mlp_simulation(
+            system.tensor_system, general_config.mlp_name, simulation_config
+        )
 
-            print(f"   Trajectory saved to: {trajectory_path}")
+        if simulation_config.n_mlp_steps > 0:
+            print("Running MLP simulation...")
+            print(f"   Steps: {simulation_config.n_mlp_steps}")
+            coords, box_vectors, mlp_simulation = run_mlp_simulation(
+                mlp_simulation, coords, box_vectors, simulation_config
+            )
+            # TODO: also save the MLP trajectory
 
         # Step 2: Generate scaled configurations for this system
         print(f"\nGenerating scaled configurations for {system.name}...")
