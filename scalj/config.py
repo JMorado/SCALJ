@@ -237,6 +237,10 @@ class SystemConfig(BaseModel):
     topologies: list[TensorTopology] | None = pydantic.Field(
         None, description="Molecular topologies (populated during workflow)."
     )
+    nmol: list[int] | None = pydantic.Field(
+        None,
+        description="Number of molecules for each component (populated during workflow).",
+    )
 
 
 class GeneralConfig(BaseModel):

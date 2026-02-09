@@ -1,10 +1,9 @@
 """Utility functions for the MACE-LJ fitting workflow."""
 
+import copy
 from pathlib import Path
 
 import torch
-import copy
-
 from openff.units import unit as offunit
 
 

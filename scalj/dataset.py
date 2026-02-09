@@ -144,14 +144,22 @@ def create_entries_from_ml_output(
     return [entry]
 
 
-def combine_datasets(mixture_datasets: dict[str, datasets.Dataset]) -> datasets.Dataset:
+def combine_datasets(
+    mixture_datasets: dict[str, datasets.Dataset],
+    composite_tensor_system=None,
+    all_tensor_systems: dict[str] | None = None,
+) -> datasets.Dataset:
     """
     Combine multiple mixture datasets into a single dataset.
 
     Each dataset will have its mixture_id field set to the corresponding key.
+    If composite_tensor_system and all_tensor_systems are provided, coordinates
+    and forces will be padded to match the composite system.
 
     Args:
         mixture_datasets: Dictionary mapping mixture_id to dataset.
+        composite_tensor_system: Optional composite system for padding.
+        all_tensor_systems: Optional dict mapping mixture_id to individual systems.
 
     Returns:
         Combined dataset with all mixtures.
@@ -165,6 +173,48 @@ def combine_datasets(mixture_datasets: dict[str, datasets.Dataset]) -> datasets.
             if "mixture_id" not in entry_dict or entry_dict["mixture_id"] is None:
                 entry_dict["mixture_id"] = mixture_id
             all_entries.append(entry_dict)
+
+    # Pad if composite system is provided
+    if composite_tensor_system is not None and all_tensor_systems is not None:
+        total_particles = composite_tensor_system.n_particles
+
+        for entry in all_entries:
+            mixture_id = entry["mixture_id"]
+            system = all_tensor_systems[mixture_id]
+            n_particles_in_system = system.n_particles
+            n_confs = len(entry["energy"])
+
+            # Convert to tensors if they're lists and reshape
+            coords = entry["coords"]
+            if isinstance(coords, list):
+                coords = torch.tensor(coords, dtype=torch.float64)
+            coords = coords.reshape(n_confs, n_particles_in_system, 3)
+
+            forces = entry["forces"]
+            if isinstance(forces, list):
+                forces = torch.tensor(forces, dtype=torch.float64)
+            forces = forces.reshape(n_confs, n_particles_in_system, 3)
+
+            # Pad coordinates
+            coords_padded = torch.zeros(
+                (n_confs, total_particles, 3), dtype=coords.dtype, device=coords.device
+            )
+            coords_padded[:, :n_particles_in_system, :] = coords
+            entry["coords"] = coords_padded.flatten().tolist()
+
+            # Pad forces
+            forces_padded = torch.zeros(
+                (n_confs, total_particles, 3), dtype=forces.dtype, device=forces.device
+            )
+            forces_padded[:, :n_particles_in_system, :] = forces
+            entry["forces"] = forces_padded.flatten().tolist()
+    else:
+        # If not padding, ensure tensors are converted to lists for PyArrow
+        for entry in all_entries:
+            if isinstance(entry["coords"], torch.Tensor):
+                entry["coords"] = entry["coords"].flatten().tolist()
+            if isinstance(entry["forces"], torch.Tensor):
+                entry["forces"] = entry["forces"].flatten().tolist()
 
     # Create combined dataset
     table = pyarrow.Table.from_pylist(all_entries, schema=DATA_SCHEMA)

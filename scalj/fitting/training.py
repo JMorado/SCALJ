@@ -54,8 +54,9 @@ def create_trainable(
 
 def predict(
     dataset: datasets.Dataset,
-    force_field: smee.TensorForceField,
-    systems: dict[str, smee.TensorSystem],
+    composite_force_field: smee.TensorForceField,
+    composite_tensor_system: smee.TensorSystem,
+    all_tensor_systems: dict[str, smee.TensorSystem],
     reference: typing.Literal["mean", "min", "none"] = "none",
     normalize: bool = True,
     energy_cutoff: float | None = None,
@@ -72,11 +73,13 @@ def predict(
     -----------
     dataset : datasets.Dataset
         The dataset to predict the energies and forces of.
-    force_field : smee.TensorForceField
+    composite_force_field : smee.TensorForceField
         The force field to use to predict the energies and forces.
-    systems : dict[str, smee.TensorSystem]
-        The systems of the molecules in the dataset. Each key should be
-            a fully indexed SMILES string.
+    composite_tensor_system : smee.TensorSystem
+        The combined system of all molecules in the dataset, used for computing energies/forces of mixtures
+    all_tensor_systems : dict[str, smee.TensorSystem]
+        The systems of the molecules in the dataset.
+        Each key should be the system name.
     reference : typing.Literal["mean", "min", "none"], optional
         The reference energy to compute the relative energies with respect
             to. This should be either the "mean" energy of all conformers, or the
@@ -106,13 +109,15 @@ def predict(
     weights_all = []
     weights_forces_all = []
 
+    composite_tensor_system = composite_tensor_system.to(device)
+
     for entry in dataset:
-        smiles = entry["smiles"]
+        mixture_id = entry["mixture_id"]
         energy_ref = entry["energy"].to(device)
         forces_ref = (entry["forces"].reshape(len(energy_ref), -1, 3)).to(device)
 
         coords_flat = smee.utils.tensor_like(
-            entry["coords"], force_field.potentials[0].parameters
+            entry["coords"], composite_force_field.potentials[0].parameters
         )
 
         coords = (
@@ -122,7 +127,7 @@ def predict(
         )
 
         box_vectors_flat = smee.utils.tensor_like(
-            entry["box_vectors"], force_field.potentials[0].parameters
+            entry["box_vectors"], composite_force_field.potentials[0].parameters
         )
         box_vectors = (
             (box_vectors_flat.reshape(len(energy_ref), 3, 3))
@@ -131,7 +136,7 @@ def predict(
             .requires_grad_(False)
         )
 
-        system = systems[smiles].to(device)
+        system = all_tensor_systems[mixture_id].to(device)
 
         energy_pred = torch.zeros_like(energy_ref)
         for i, (coord, box_vector) in tqdm(
@@ -140,7 +145,9 @@ def predict(
             desc="Predicting energies/forces",
             leave=False,
         ):
-            energy_pred[i] = smee.compute_energy(system, force_field, coord, box_vector)
+            energy_pred[i] = smee.compute_energy(
+                composite_tensor_system, composite_force_field, coord, box_vector
+            )
 
         forces_pred = -torch.autograd.grad(
             energy_pred.sum(),
@@ -319,7 +326,8 @@ def _compute_loss(
 def train_parameters(
     trainable: descent.train.Trainable,
     dataset: datasets.Dataset,
-    systems: dict[str, smee.TensorSystem],
+    composite_tensor_system: smee.TensorSystem,
+    all_tensor_systems: dict[str, smee.TensorSystem],
     config: TrainingConfig,
 ) -> tuple[list[float], list[float]]:
     """
@@ -331,8 +339,11 @@ def train_parameters(
         Trainable object with parameters to optimize
     dataset : datasets.Dataset
         Training dataset
-    systems : dict[str, smee.TensorSystem]
-        Molecular systems
+    composite_tensor_system : smee.TensorSystem
+        The combined system of all molecules in the dataset, used for computing energies/forces of mixtures
+    all_tensor_systems : dict[str, smee.TensorSystem]
+        The systems of the molecules in the dataset.
+        Each key should be the system name.
     config : TrainingConfig
         Training configuration
 
@@ -370,7 +381,8 @@ def train_parameters(
             trainable.to_force_field(params.abs()).to(
                 config.device
             ),  # Note the absolute value, as the LJ parameters are positive
-            systems,
+            composite_tensor_system,
+            all_tensor_systems,
             reference=config.reference,
             normalize=config.normalize,
             energy_cutoff=config.energy_cutoff,

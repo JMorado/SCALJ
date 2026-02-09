@@ -8,7 +8,7 @@ import smee
 import smee.converters
 import smee.mm
 from openff.interchange import Interchange
-from openff.toolkit import ForceField, Molecule
+from openff.toolkit import ForceField, Molecule, Topology
 
 from .. import dataset as ds
 from .. import plots
@@ -69,6 +69,11 @@ def run_workflow(args):
         parameter_config,
     ) = create_configs_from_dict(config_dict)
 
+    # Assert that all systems have different names
+    system_names = [system.name for system in general_config.systems]
+    if len(system_names) != len(set(system_names)):
+        raise ValueError("All systems must have different names.")
+
     # Create output directory
     output_dir = Path(general_config.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -84,26 +89,31 @@ def run_workflow(args):
         print(f"\nNumber of systems/mixtures: {len(general_config.systems)}")
         for system in general_config.systems:
             print(f"\n   System: {system.name} (weight: {system.weight})")
-            interchange = Interchange.from_smirnoff(
-                force_field,
-                [Molecule.from_smiles(comp.smiles) for comp in system.components],
-            )
+
+            # Create the Molecule and Interchange objects for this system
+            mols = [Molecule.from_smiles(comp.smiles) for comp in system.components]
+            interchanges = [
+                Interchange.from_smirnoff(force_field, [mol]) for mol in mols
+            ]
+
             # Create tensor forcefield and topologies
             tensor_forcefield, topologies = smee.converters.convert_interchange(
-                interchange
+                interchanges
             )
+
             system.tensor_forcefield = tensor_forcefield
             system.topologies = topologies
+            system.nmol = [comp.nmol for comp in system.components]
 
             # Create tensor system
-            nmol_list = [comp.nmol for comp in system.components]
-            topologies_list = [topologies[i] for i in range(len(topologies))]
             system.tensor_system = smee.TensorSystem(
-                topologies_list, nmol_list, is_periodic=True
+                topologies, system.nmol, is_periodic=True
             )
             for comp in system.components:
                 print(f"      - {comp.smiles}: {comp.nmol} molecules")
 
+    # print(system.tensor_system.n_atoms)
+    # exit()
     # Process each mixture/system
     systems_ds = {}
 
@@ -210,46 +220,53 @@ def run_workflow(args):
         systems_ds[system.name] = system_dataset
         print(f"   Computed energies and forces for {len(entries)} configurations")
 
-    # Step 4: Combine datasets from all mixtures
+    # Step 4: Build composite system and force field
+    print("\n" + "=" * 80)
+    print(
+        "Generating composite objects for simultaneous training across all mixtures..."
+    )
+    print("=" * 80)
+    composite_mols = [
+        Molecule.from_smiles(comp.smiles)
+        for system in general_config.systems
+        for comp in system.components
+    ]
+    composite_interchanges = [
+        Interchange.from_smirnoff(force_field, [mol]) for mol in composite_mols
+    ]
+    composite_tensor_forcefield, composite_topologies = (
+        smee.converters.convert_interchange(composite_interchanges)
+    )
+    composite_tensor_system = smee.TensorSystem(
+        composite_topologies,
+        [comp.nmol for system in general_config.systems for comp in system.components],
+        is_periodic=True,
+    )
+
+    # Step 5: Combine datasets from all mixtures with padding
     print("\n" + "=" * 80)
     print("Combining datasets from all mixtures...")
     print("=" * 80)
+    all_tensor_systems = {
+        system.name: system.tensor_system for system in general_config.systems
+    }
 
-    combined_dataset = ds.combine_datasets(systems_ds)
+    combined_dataset = ds.combine_datasets(
+        systems_ds,
+        composite_tensor_system=composite_tensor_system,
+        all_tensor_systems=all_tensor_systems,
+    )
     print(f"   Combined dataset size: {len(combined_dataset)} configurations")
     print(f"   Mixtures: {', '.join(systems_ds.keys())}")
 
-    # Step 5: Train LJ parameters on combined dataset
-    print("\n" + "=" * 80)
-    print("Training Lennard-Jones parameters across all mixtures...")
-    print("=" * 80)
-    print(f"   Learning rate: {training_config.learning_rate}")
-    print(f"   Epochs: {training_config.n_epochs}")
-    print(f"   Device: {training_config.device}")
-    print(f"   Parameters: {parameter_config.cols}")
-
-    # Get tensor_forcefield from first system (all systems share the same force field)
-    tensor_forcefield = general_config.systems[0].tensor_forcefield
-
-    # Build topologies dictionary from systems
-    all_topologies = {}
-    for system in general_config.systems:
-        smiles_str = ".".join([comp.smiles for comp in system.components])
-        all_topologies[smiles_str] = system.tensor_system
-
-    trainable = create_trainable(tensor_forcefield, parameter_config, training_config)
-    initial_force_field = trainable.to_force_field(trainable.to_values())
-    print("\n" + "=" * 80)
-    print("Initial parameters...")
-    print("=" * 80)
-    descent.utils.reporting.print_potential_summary(
-        initial_force_field.potentials_by_type["vdW"]
+    composite_trainable = create_trainable(
+        composite_tensor_forcefield, parameter_config, training_config
     )
-
     energy_ref, energy_pred, forces_ref, forces_pred, _, _, mask_idx = predict(
         combined_dataset,
-        initial_force_field,
-        all_topologies,
+        composite_trainable.to_force_field(composite_trainable.to_values()),
+        composite_tensor_system,
+        all_tensor_systems=all_tensor_systems,
         reference=training_config.reference,
         normalize=False,
         device=training_config.device,
@@ -272,7 +289,7 @@ def run_workflow(args):
         "kcal/mol/Å",
         output_dir / "parity_forces_initial.png",
     )
-
+    """
     plots.plot_energy_vs_scale(
         scale_factors[mask_idx.detach().cpu().numpy()],
         [energy_ref.detach().cpu().numpy(), energy_pred.detach().cpu().numpy()],
@@ -280,13 +297,24 @@ def run_workflow(args):
         labels=["Reference", "Optimized"],
         lims=(0, 30),
     )
+    """
 
-    print("\n" + "=" * 80)
-    print("Training...")
     print("=" * 80)
 
+    # Step 6: Train LJ parameters on combined dataset
+    print("\n" + "=" * 80)
+    print("Training Lennard-Jones parameters across all mixtures...")
+    print("=" * 80)
+    print(f"   Learning rate: {training_config.learning_rate}")
+    print(f"   Epochs: {training_config.n_epochs}")
+    print(f"   Device: {training_config.device}")
+    print(f"   Parameters: {parameter_config.cols}")
     final_params, energy_losses, force_losses = train_parameters(
-        trainable, combined_dataset, all_topologies, training_config
+        composite_trainable,
+        combined_dataset,
+        composite_tensor_system,
+        all_tensor_systems,
+        training_config,
     )
 
     # Plot training losses
@@ -296,7 +324,7 @@ def run_workflow(args):
     print("\n" + "=" * 80)
     print("Final parameters...")
     print("=" * 80)
-    final_force_field = trainable.to_force_field(final_params)
+    final_force_field = composite_trainable.to_force_field(final_params)
     descent.utils.reporting.print_potential_summary(
         final_force_field.potentials_by_type["vdW"]
     )
@@ -309,7 +337,8 @@ def run_workflow(args):
     energy_ref, energy_pred, forces_ref, forces_pred, _, _, mask_idx = predict(
         combined_dataset,
         final_force_field.to(training_config.device),
-        all_topologies,
+        composite_tensor_system,
+        all_tensor_systems=all_tensor_systems,
         reference=training_config.reference,
         normalize=False,
         device=training_config.device,
@@ -346,11 +375,10 @@ def run_workflow(args):
     print("Running thermodynamic benchmark...")
     print("=" * 80)
     for system in general_config.systems:
-        smiles_str = ".".join([comp.smiles for comp in system.components])
         results_final = run_thermo_benchmark(
-            smiles_str,
-            trainable,
-            all_topologies[smiles_str].topologies,
+            system.name,
+            composite_trainable,
+            all_tensor_systems[system.name].topologies,
             final_params,
         )
 

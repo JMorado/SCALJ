@@ -164,15 +164,44 @@ def create_scaled_dataset(
     all_coords = []
     all_box_vectors = []
 
-    assert len(tensor_system.topologies) == 1, "Only one topology is supported"
-    n_atoms_per_mol = len(tensor_system.topologies[0].atomic_nums)
-
     for scale in scale_factors:
-        scaled_coords, scaled_box_vecs = _scale_molecule_positions(
-            coords, box_vectors, n_atoms_per_mol, float(scale)
-        )
-        all_coords.append(scaled_coords)
-        all_box_vectors.append(scaled_box_vecs)
+        scaled_slices = []
+        current_idx = 0
+        final_scaled_box_vecs = None
+
+        for topology, n_copy in zip(tensor_system.topologies, tensor_system.n_copies):
+            n_atoms_per_mol = len(topology.atomic_nums)
+            n_atoms_total_species = n_atoms_per_mol * n_copy
+
+            # Slice coords for this species
+            if coords.ndim == 2:
+                species_coords = coords[
+                    current_idx : current_idx + n_atoms_total_species
+                ]
+            else:
+                species_coords = coords[
+                    :, current_idx : current_idx + n_atoms_total_species, :
+                ]
+
+            # Scale this block of molecules
+            scaled_species_coords, scaled_box_vecs = _scale_molecule_positions(
+                species_coords, box_vectors, n_atoms_per_mol, float(scale)
+            )
+
+            scaled_slices.append(scaled_species_coords)
+            current_idx += n_atoms_total_species
+
+            # Keep the scaled box vectors (they are the same for all species)
+            final_scaled_box_vecs = scaled_box_vecs
+
+        # Concatenate all scaled species coordinates
+        if coords.ndim == 2:
+            full_scaled_coords = np.concatenate(scaled_slices, axis=0)
+        else:
+            full_scaled_coords = np.concatenate(scaled_slices, axis=1)
+
+        all_coords.append(full_scaled_coords)
+        all_box_vectors.append(final_scaled_box_vecs)
 
     return all_coords, all_box_vectors
 

@@ -3,8 +3,8 @@
 import argparse
 import sys
 
-from .utils import generate_config
 from .run import run_workflow
+from .utils import generate_config
 
 
 def main():
