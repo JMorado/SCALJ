@@ -301,8 +301,12 @@ def run_workflow(args):
         len_scale = len(scale_factors[mask_idx.detach().cpu().numpy()])
         plots.plot_energy_vs_scale(
             scale_factors[mask_idx.detach().cpu().numpy()],
-            [energy_ref.detach().cpu().numpy()[i*len_scale:(i+1)*len_scale], energy_pred.detach().cpu().numpy()[i*len_scale:(i+1)*len_scale]],
-            output_dir / f"energy_vs_scale_initial_{list(all_tensor_systems.keys())[i]}.png",
+            [
+                energy_ref.detach().cpu().numpy()[i * len_scale : (i + 1) * len_scale],
+                energy_pred.detach().cpu().numpy()[i * len_scale : (i + 1) * len_scale],
+            ],
+            output_dir
+            / f"energy_vs_scale_initial_{list(all_tensor_systems.keys())[i]}.png",
             labels=["Reference", "Optimized"],
             lims=(0, 30),
         )
