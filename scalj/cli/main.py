@@ -3,7 +3,7 @@
 import argparse
 import sys
 
-from .generate_config import generate_config
+from .utils import generate_config
 from .run import run_workflow
 
 
