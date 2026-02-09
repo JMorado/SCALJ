@@ -247,9 +247,18 @@ def run_workflow(args):
     print("\n" + "=" * 80)
     print("Combining datasets from all mixtures...")
     print("=" * 80)
-    all_tensor_systems = {
-        system.name: system.tensor_system for system in general_config.systems
-    }
+    all_tensor_systems = {}
+    idx_counter = 0
+    for system in general_config.systems:
+        n_comps = len(system.components)
+        system_topologies = composite_topologies[idx_counter : idx_counter + n_comps]
+        idx_counter += n_comps
+        print(idx_counter, idx_counter + n_comps)
+        all_tensor_systems[system.name] = smee.TensorSystem(
+            system_topologies,
+            [comp.nmol for comp in system.components],
+            is_periodic=True,
+        )
 
     combined_dataset = ds.combine_datasets(
         systems_ds,
@@ -265,14 +274,13 @@ def run_workflow(args):
     energy_ref, energy_pred, forces_ref, forces_pred, _, _, mask_idx = predict(
         combined_dataset,
         composite_trainable.to_force_field(composite_trainable.to_values()),
-        composite_tensor_system,
         all_tensor_systems=all_tensor_systems,
         reference=training_config.reference,
         normalize=False,
         device=training_config.device,
         energy_cutoff=training_config.energy_cutoff,
     )
-
+    print(energy_pred, energy_ref)
     # Plot parity
     plots.plot_parity(
         energy_ref.detach().cpu().numpy(),
@@ -289,16 +297,16 @@ def run_workflow(args):
         "kcal/mol/Å",
         output_dir / "parity_forces_initial.png",
     )
-    """
-    plots.plot_energy_vs_scale(
-        scale_factors[mask_idx.detach().cpu().numpy()],
-        [energy_ref.detach().cpu().numpy(), energy_pred.detach().cpu().numpy()],
-        output_dir / "energy_vs_scale_initial.png",
-        labels=["Reference", "Optimized"],
-        lims=(0, 30),
-    )
-    """
-
+    for i in range(len(all_tensor_systems)):
+        len_scale = len(scale_factors[mask_idx.detach().cpu().numpy()])
+        plots.plot_energy_vs_scale(
+            scale_factors[mask_idx.detach().cpu().numpy()],
+            [energy_ref.detach().cpu().numpy()[i*len_scale:(i+1)*len_scale], energy_pred.detach().cpu().numpy()[i*len_scale:(i+1)*len_scale]],
+            output_dir / f"energy_vs_scale_initial_{list(all_tensor_systems.keys())[i]}.png",
+            labels=["Reference", "Optimized"],
+            lims=(0, 30),
+        )
+    exit()
     print("=" * 80)
 
     # Step 6: Train LJ parameters on combined dataset
@@ -312,7 +320,6 @@ def run_workflow(args):
     final_params, energy_losses, force_losses = train_parameters(
         composite_trainable,
         combined_dataset,
-        composite_tensor_system,
         all_tensor_systems,
         training_config,
     )
@@ -337,7 +344,6 @@ def run_workflow(args):
     energy_ref, energy_pred, forces_ref, forces_pred, _, _, mask_idx = predict(
         combined_dataset,
         final_force_field.to(training_config.device),
-        composite_tensor_system,
         all_tensor_systems=all_tensor_systems,
         reference=training_config.reference,
         normalize=False,

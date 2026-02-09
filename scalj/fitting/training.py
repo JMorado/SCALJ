@@ -55,7 +55,6 @@ def create_trainable(
 def predict(
     dataset: datasets.Dataset,
     composite_force_field: smee.TensorForceField,
-    composite_tensor_system: smee.TensorSystem,
     all_tensor_systems: dict[str, smee.TensorSystem],
     reference: typing.Literal["mean", "min", "none"] = "none",
     normalize: bool = True,
@@ -75,8 +74,6 @@ def predict(
         The dataset to predict the energies and forces of.
     composite_force_field : smee.TensorForceField
         The force field to use to predict the energies and forces.
-    composite_tensor_system : smee.TensorSystem
-        The combined system of all molecules in the dataset, used for computing energies/forces of mixtures
     all_tensor_systems : dict[str, smee.TensorSystem]
         The systems of the molecules in the dataset.
         Each key should be the system name.
@@ -108,8 +105,6 @@ def predict(
     forces_ref_all, forces_pred_all = [], []
     weights_all = []
     weights_forces_all = []
-
-    composite_tensor_system = composite_tensor_system.to(device)
 
     for entry in dataset:
         mixture_id = entry["mixture_id"]
@@ -146,7 +141,7 @@ def predict(
             leave=False,
         ):
             energy_pred[i] = smee.compute_energy(
-                composite_tensor_system, composite_force_field, coord, box_vector
+                system, composite_force_field, coord, box_vector
             )
 
         forces_pred = -torch.autograd.grad(
@@ -326,7 +321,6 @@ def _compute_loss(
 def train_parameters(
     trainable: descent.train.Trainable,
     dataset: datasets.Dataset,
-    composite_tensor_system: smee.TensorSystem,
     all_tensor_systems: dict[str, smee.TensorSystem],
     config: TrainingConfig,
 ) -> tuple[list[float], list[float]]:
@@ -339,8 +333,6 @@ def train_parameters(
         Trainable object with parameters to optimize
     dataset : datasets.Dataset
         Training dataset
-    composite_tensor_system : smee.TensorSystem
-        The combined system of all molecules in the dataset, used for computing energies/forces of mixtures
     all_tensor_systems : dict[str, smee.TensorSystem]
         The systems of the molecules in the dataset.
         Each key should be the system name.
@@ -381,7 +373,6 @@ def train_parameters(
             trainable.to_force_field(params.abs()).to(
                 config.device
             ),  # Note the absolute value, as the LJ parameters are positive
-            composite_tensor_system,
             all_tensor_systems,
             reference=config.reference,
             normalize=config.normalize,
