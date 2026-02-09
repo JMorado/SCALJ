@@ -3,6 +3,9 @@
 from pathlib import Path
 
 import torch
+import copy
+
+from openff.units import unit as offunit
 
 
 def perturb_tensor(
@@ -62,3 +65,46 @@ def ensure_directory(path: Path) -> Path:
     path = Path(path)
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def create_off_forcefield_from_tensor(forcefield, tensor_ff):
+    """
+    Get an OpenFF ForceField object with updated parameters from a tensor-based force field.
+
+    Notes
+    -----
+    Currently this only works for the vdW parameters, and specifically using the 
+    Double Exponential potential or the Lennard-Jones potential.
+
+    Parameters
+    ----------
+    forcefield : openff.toolkit.typing.engines.smirnoff.ForceField\
+        The OpenFF force field to update.
+    tensor_ff : smee._models.TensorForceField
+        The tensor-based force field containing the new parameters.
+
+    Returns
+    -------
+    openff.toolkit.typing.engines.smirnoff.ForceField
+        The updated OpenFF force field.
+    """
+    forcefield = copy.deepcopy(forcefield)
+    tag = (
+        "vdW"
+        if forcefield.get_parameter_handler("vdW").parameters
+        else "DoubleExponential"
+    )
+    potential_vdw = tensor_ff.potentials_by_type["vdW"]
+    off_potential_vdw = forcefield.get_parameter_handler(tag)
+    for i in range(potential_vdw.parameters.shape[1]):
+        col = potential_vdw.parameter_cols[i]
+        for j in range(potential_vdw.parameters.shape[0]):
+            smirk_id = potential_vdw.parameter_keys[j].id
+            val = potential_vdw.parameters[j, i]
+            unit = (
+                offunit.kilocalories_per_mole if col == "epsilon" else offunit.angstrom
+            )
+            param = off_potential_vdw.get_parameter({"smirks": smirk_id})[0]
+            setattr(param, col, val.item() * unit)
+
+    return forcefield

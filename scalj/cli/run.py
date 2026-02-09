@@ -373,6 +373,17 @@ def run_workflow(args):
     # results_path = output_dir / "results.yaml"
     # print(f"\nSaving results to: {results_path}")
 
+    from ..utils import create_off_forcefield_from_tensor
+
+    print("\n" + "=" * 80)
+    off_xml_file = output_dir / "optimized_forcefield.offxml"
+    print(f"Saving optimized force field to {off_xml_file}...")
+    print("=" * 80)
+    updated_forcefield = create_off_forcefield_from_tensor(
+        force_field, final_force_field
+    )
+    updated_forcefield.to_file(off_xml_file)
+
     print("\n" + "=" * 80)
     print("Workflow completed successfully!")
     print("=" * 80)
