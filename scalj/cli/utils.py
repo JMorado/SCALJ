@@ -85,7 +85,7 @@ def generate_config(args):
                 components=[
                     cfg.MoleculeComponent(
                         smiles="[C:1]([H:3])([H:4])([H:5])[O:2][H:6]",
-                        nmol=323,
+                        nmol=350,
                     )
                 ],
             )
@@ -100,6 +100,7 @@ def generate_config(args):
         n_nvt_steps=50000,
         n_npt_equilibration_steps=50000,
         n_production_steps=1000000,
+        n_mlp_steps=0,
         report_interval=2000,
     )
 
@@ -116,7 +117,7 @@ def generate_config(args):
         device="cuda",
         energy_weight=1.0,
         force_weight=1.0,
-        reference="none",
+        reference="min",
         normalize=True,
     )
 

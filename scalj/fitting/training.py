@@ -63,7 +63,13 @@ def predict(
     weighting_temperature: float = 298.15,
     device: str = "cpu",
 ) -> tuple[
-    torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    list[torch.Tensor],
 ]:
     """
     Predict the relative energies per molecule [kcal/mol] and forces [kcal/mol/Å] of a dataset.
@@ -97,6 +103,7 @@ def predict(
     Returns
     -------
         tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+        tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, list[torch.Tensor]]
             The predicted and reference relative energies [kcal/mol],
             predicted and reference forces [kcal/mol/Å], weights for energies,
             and weights for forces.
@@ -105,6 +112,7 @@ def predict(
     forces_ref_all, forces_pred_all = [], []
     weights_all = []
     weights_forces_all = []
+    all_mask_idxs = []
 
     for entry in dataset:
         mixture_id = entry["mixture_id"]
@@ -223,6 +231,8 @@ def predict(
         weights_all.append(weights_masked)
         weights_forces_all.append(weights_forces_masked)
 
+        all_mask_idxs.append(mask_idx)
+
     if not energy_pred_all:
         raise ValueError("No valid conformers found after filtering")
 
@@ -258,7 +268,7 @@ def predict(
         forces_pred_all,
         weights_all,
         weights_forces_all,
-        mask_idx,
+        all_mask_idxs,
     )
 
 

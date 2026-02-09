@@ -1,5 +1,6 @@
 """Run the SCALJ workflow."""
 
+import os
 from pathlib import Path
 
 import descent.utils.reporting
@@ -112,8 +113,6 @@ def run_workflow(args):
             for comp in system.components:
                 print(f"      - {comp.smiles}: {comp.nmol} molecules")
 
-    # print(system.tensor_system.n_atoms)
-    # exit()
     # Process each mixture/system
     systems_ds = {}
 
@@ -253,7 +252,6 @@ def run_workflow(args):
         n_comps = len(system.components)
         system_topologies = composite_topologies[idx_counter : idx_counter + n_comps]
         idx_counter += n_comps
-        print(idx_counter, idx_counter + n_comps)
         all_tensor_systems[system.name] = smee.TensorSystem(
             system_topologies,
             [comp.nmol for comp in system.components],
@@ -271,7 +269,8 @@ def run_workflow(args):
     composite_trainable = create_trainable(
         composite_tensor_forcefield, parameter_config, training_config
     )
-    energy_ref, energy_pred, forces_ref, forces_pred, _, _, mask_idx = predict(
+    print(f"   Energy cutoff: {training_config.energy_cutoff} kcal/mol")
+    energy_ref, energy_pred, forces_ref, forces_pred, _, _, all_mask_idxs = predict(
         combined_dataset,
         composite_trainable.to_force_field(composite_trainable.to_values()),
         all_tensor_systems=all_tensor_systems,
@@ -280,7 +279,7 @@ def run_workflow(args):
         device=training_config.device,
         energy_cutoff=training_config.energy_cutoff,
     )
-    print(energy_pred, energy_ref)
+
     # Plot parity
     plots.plot_parity(
         energy_ref.detach().cpu().numpy(),
@@ -297,20 +296,35 @@ def run_workflow(args):
         "kcal/mol/Å",
         output_dir / "parity_forces_initial.png",
     )
-    for i in range(len(all_tensor_systems)):
-        len_scale = len(scale_factors[mask_idx.detach().cpu().numpy()])
+    offset = 0
+    for i, system_name in enumerate(all_tensor_systems.keys()):
+        mask = all_mask_idxs[i].detach().cpu().numpy()
+        n_points = len(mask)
+
+        # Per-system Parity Plot (Energy)
+        e_ref_sys = energy_ref.detach().cpu().numpy()[offset : offset + n_points]
+        e_pred_sys = energy_pred.detach().cpu().numpy()[offset : offset + n_points]
+
+        plots.plot_parity(
+            e_ref_sys,
+            e_pred_sys,
+            f"Energy ({system_name})",
+            "kcal/mol",
+            output_dir / f"parity_energy_initial_{system_name}.png",
+        )
+
         plots.plot_energy_vs_scale(
-            scale_factors[mask_idx.detach().cpu().numpy()],
+            scale_factors[mask],
             [
-                energy_ref.detach().cpu().numpy()[i * len_scale : (i + 1) * len_scale],
-                energy_pred.detach().cpu().numpy()[i * len_scale : (i + 1) * len_scale],
+                e_ref_sys,
+                e_pred_sys,
             ],
-            output_dir
-            / f"energy_vs_scale_initial_{list(all_tensor_systems.keys())[i]}.png",
+            output_dir / f"energy_vs_scale_initial_{system_name}.png",
             labels=["Reference", "Optimized"],
             lims=(0, 30),
         )
-    exit()
+        offset += n_points
+
     print("=" * 80)
 
     # Step 6: Train LJ parameters on combined dataset
@@ -344,8 +358,9 @@ def run_workflow(args):
     print("\n" + "=" * 80)
     print("Evaluating final parameters...")
     print("=" * 80)
+    print(f"   Energy cutoff: {training_config.energy_cutoff} kcal/mol")
 
-    energy_ref, energy_pred, forces_ref, forces_pred, _, _, mask_idx = predict(
+    energy_ref, energy_pred, forces_ref, forces_pred, _, _, all_mask_idxs = predict(
         combined_dataset,
         final_force_field.to(training_config.device),
         all_tensor_systems=all_tensor_systems,
@@ -372,23 +387,48 @@ def run_workflow(args):
         output_dir / "parity_forces_final.png",
     )
 
-    plots.plot_energy_vs_scale(
-        scale_factors[mask_idx.detach().cpu().numpy()],
-        [energy_ref.detach().cpu().numpy(), energy_pred.detach().cpu().numpy()],
-        output_dir / "energy_vs_scale_final.png",
-        labels=["Reference", "Predicted"],
-        lims=(0, 30),
-    )
+    offset = 0
+    for i, system_name in enumerate(all_tensor_systems.keys()):
+        mask = all_mask_idxs[i].detach().cpu().numpy()
+        n_points = len(mask)
+
+        # Per-system Parity Plot (Energy)
+        e_ref_sys = energy_ref.detach().cpu().numpy()[offset : offset + n_points]
+        e_pred_sys = energy_pred.detach().cpu().numpy()[offset : offset + n_points]
+
+        plots.plot_parity(
+            e_ref_sys,
+            e_pred_sys,
+            f"Energy ({system_name})",
+            "kcal/mol",
+            output_dir / f"parity_energy_final_{system_name}.png",
+        )
+
+        plots.plot_energy_vs_scale(
+            scale_factors[mask],
+            [
+                e_ref_sys,
+                e_pred_sys,
+            ],
+            output_dir / f"energy_vs_scale_final_{system_name}.png",
+            labels=["Reference", "Optimized"],
+            lims=(0, 30),
+        )
+        offset += n_points
 
     # Run thermodynamic benchmark
+    os.environ["SMEE_USE_PME"] = "1"
     print("\n" + "=" * 80)
     print("Running thermodynamic benchmark...")
     print("=" * 80)
     for system in general_config.systems:
+        smiles_a = system.components[0].smiles
+        smiles_b = system.components[1].smiles if len(system.components) > 1 else None
         results_final = run_thermo_benchmark(
-            system.name,
             composite_trainable,
             all_tensor_systems[system.name].topologies,
+            smiles_a,
+            smiles_b,
             final_params,
         )
 

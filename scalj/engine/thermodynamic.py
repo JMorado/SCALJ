@@ -1,32 +1,35 @@
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import descent.targets.thermo
 import torch
 
 
 def run_thermo_benchmark(
-    smiles: str,
     trainable,
     topologies: list,
+    smiles_a: str,
+    smiles_b: Optional[str] = None,
     parameters: torch.Tensor | None = None,
     n_replicas: int = 3,
     output_dir: Path = Path("./predictions"),
     cache_dir: Path = Path("./cache"),
-    density_ref: float = 0.79,
-    hvap_ref: float = 38.30,
+    density_ref: float = 999,
+    hvap_ref: float = 999,
 ) -> list[Any]:
     """
     Run thermodynamic benchmark (Density, Hvap) for a given system.
 
     Parameters
     ----------
-    smiles : str
-        SMILES string of the molecule.
     trainable : descent.train.Trainable
         Trainable object containing the force field.
     topologies : list
         List of topologies (used to map SMILES to topology).
+    smiles_a : str
+        SMILES string of the first molecule.
+    smiles_b : Optional[str], optional
+        SMILES string of the second molecule, by default None.
     parameters : torch.Tensor, optional
         Optimized parameters to apply to the force field. If None, uses trainable defaults.
     n_replicas : int, optional
@@ -56,10 +59,10 @@ def run_thermo_benchmark(
     for n in range(n_replicas):
         density_pure = {
             "type": "density",
-            "smiles_a": smiles,
+            "smiles_a": smiles_a,
             "x_a": 1.0,
-            "smiles_b": None,
-            "x_b": None,
+            "smiles_b": smiles_b,
+            "x_b": 1.0 if smiles_b is not None else None,
             "temperature": 300.0,
             "pressure": 1.0,
             "value": density_ref,
@@ -70,10 +73,10 @@ def run_thermo_benchmark(
 
         hvap = {
             "type": "hvap",
-            "smiles_a": smiles,
+            "smiles_a": smiles_a,
             "x_a": 1.0,
-            "smiles_b": None,
-            "x_b": None,
+            "smiles_b": smiles_b,
+            "x_b": 1.0 if smiles_b is not None else None,
             "temperature": 300.0,
             "pressure": 1.0,
             "value": hvap_ref,
@@ -87,7 +90,10 @@ def run_thermo_benchmark(
         results = descent.targets.thermo.predict(
             dataset,
             force_field,
-            {smiles: topologies[0]},
+            {
+                smiles_a: topologies[0],
+                smiles_b: topologies[1] if smiles_b is not None else None,
+            },
             output_dir=output_dir,
             cached_dir=cache_dir,
             verbose=True,
