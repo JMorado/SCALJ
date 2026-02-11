@@ -7,8 +7,8 @@ Lennard-Jones Parameter Fitting via Condensed-Phase Volume-Scaling.
 First, clone the repository:
 
 ```bash
-git clone https://github.com/JMorado/SCALJ.git
-cd SCALJ
+git clone https://github.com/JMorado/SCALeJ.git
+cd SCALeJ
 ```
 
 Then, create a conda environment with all the required dependencies:
