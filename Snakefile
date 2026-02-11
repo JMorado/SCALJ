@@ -52,7 +52,7 @@ rule md_system:
     shell:
         """
         mkdir -p {params.output_dir}/logs
-        scalj md \
+        scalej md \
             --config {input.config} \
             --output-dir {params.output_dir} \
             --system-name {params.system_name} \
@@ -77,7 +77,7 @@ rule scaling_system:
     shell:
         """
         mkdir -p {params.output_dir}/logs
-        scalj scaling \
+        scalej scaling \
             --config {input.config} \
             --output-dir {params.output_dir} \
             --system-name {params.system_name} \
@@ -119,7 +119,7 @@ rule ml_potential_system:
     shell:
         """
         mkdir -p {params.output_dir}/logs
-        scalj ml_potential \
+        scalej ml_potential \
             --config {input.config} \
             --output-dir {params.output_dir} \
             --system-name {params.system_name} \
@@ -144,7 +144,7 @@ rule dataset:
     shell:
         """
         mkdir -p {params.output_dir}/logs
-        scalj dataset \
+        scalej dataset \
             --config {input.config} \
             --output-dir {params.output_dir} \
             --log-file {log} 2>&1 | tee -a {log}
@@ -169,7 +169,7 @@ rule training:
     shell:
         """
         mkdir -p {params.output_dir}/logs
-        scalj training \
+        scalej training \
             --config {input.config} \
             --output-dir {params.output_dir} \
             --log-file {log} 2>&1 | tee -a {log}
@@ -195,7 +195,7 @@ rule evaluation_initial:
     shell:
         """
         mkdir -p {params.output_dir}/logs
-        scalj evaluation \
+        scalej evaluation \
             --config {input.config} \
             --output-dir {params.output_dir} \
             --params-file {input.params} \
@@ -223,7 +223,7 @@ rule evaluation_final:
     shell:
         """
         mkdir -p {params.output_dir}/logs
-        scalj evaluation \
+        scalej evaluation \
             --config {input.config} \
             --output-dir {params.output_dir} \
             --params-file {input.params} \
@@ -249,7 +249,7 @@ rule benchmark_system:
     shell:
         """
         mkdir -p {params.output_dir}/logs
-        scalj benchmark \
+        scalej benchmark \
             --config {input.config} \
             --output-dir {params.output_dir} \
             --params-file {input.params} \
@@ -276,7 +276,7 @@ rule export:
     shell:
         """
         mkdir -p {params.output_dir}/logs
-        scalj export \
+        scalej export \
             --config {input.config} \
             --output-dir {params.output_dir} \
             --params-file {input.params} \

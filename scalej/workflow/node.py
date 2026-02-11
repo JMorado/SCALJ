@@ -11,7 +11,7 @@ class WorkflowNode(abc.ABC):
     """
     Base class for workflow nodes.
 
-    Each node represents a discrete step in the SCALJ workflow that:
+    Each node represents a discrete step in the SCALeJ workflow that:
     - Takes specific input file paths
     - Performs a well-defined computation
     - Writes output files to disk

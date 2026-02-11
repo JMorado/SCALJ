@@ -1,4 +1,4 @@
-"""CLI module for SCALJ."""
+"""CLI module for SCALeJ."""
 
 from .main import main
 

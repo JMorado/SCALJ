@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
-    {name = "SCALJ Contributors"}
+    {name = "SCALeJ Contributors"}
 ]
 keywords = ["molecular dynamics", "machine learning", "force field", "Lennard-Jones", "fitting"]
 classifiers = [

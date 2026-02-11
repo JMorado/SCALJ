@@ -13,7 +13,7 @@ def main():
     Parses command-line arguments and executes the appropriate subcommand.
     """
     parser = argparse.ArgumentParser(
-        description="SCALJ - LJ Parameter Fitting (Modular Workflow)",
+        description="SCALeJ - LJ Parameter Fitting",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

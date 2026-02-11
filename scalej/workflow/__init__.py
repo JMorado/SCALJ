@@ -1,4 +1,4 @@
-"""Workflow node system for modular SCALJ execution."""
+"""Workflow node system for modular SCALeJ execution."""
 
 from .base_nodes import MLPotentialBaseNode, PredictionBaseNode
 from .benchmark_node import BenchmarkNode
