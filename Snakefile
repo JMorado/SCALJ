@@ -32,6 +32,8 @@ rule all:
     input:
         expand(f"{OUTPUT_DIR}/parity_energy_initial_{{system}}.png", system=SYSTEMS),
         expand(f"{OUTPUT_DIR}/parity_energy_final_{{system}}.png", system=SYSTEMS),
+        f"{OUTPUT_DIR}/initial_energy_vs_scale_total.png",
+        f"{OUTPUT_DIR}/final_energy_vs_scale_total.png",
         f"{OUTPUT_DIR}/optimized_forcefield.offxml",
         f"{OUTPUT_DIR}/benchmark_results.txt"
 
@@ -184,9 +186,10 @@ rule evaluation_initial:
         dataset=f"{OUTPUT_DIR}/combined_dataset.pkl",
         composite=f"{OUTPUT_DIR}/composite_system.pkl"
     output:
+        f"{OUTPUT_DIR}/metrics_initial.json",
         expand(f"{OUTPUT_DIR}/parity_energy_initial_{{system}}.png", system=SYSTEMS),
         expand(f"{OUTPUT_DIR}/parity_forces_initial_{{system}}.png", system=SYSTEMS),
-        expand(f"{OUTPUT_DIR}/energy_vs_scale_initial_{{system}}.png", system=SYSTEMS)
+        f"{OUTPUT_DIR}/initial_energy_vs_scale_total.png"
     params:
         output_dir=OUTPUT_DIR
     threads: 1
@@ -212,9 +215,10 @@ rule evaluation_final:
         dataset=f"{OUTPUT_DIR}/combined_dataset.pkl",
         composite=f"{OUTPUT_DIR}/composite_system.pkl"
     output:
+        f"{OUTPUT_DIR}/metrics_final.json",
         expand(f"{OUTPUT_DIR}/parity_energy_final_{{system}}.png", system=SYSTEMS),
         expand(f"{OUTPUT_DIR}/parity_forces_final_{{system}}.png", system=SYSTEMS),
-        expand(f"{OUTPUT_DIR}/energy_vs_scale_final_{{system}}.png", system=SYSTEMS)
+        f"{OUTPUT_DIR}/final_energy_vs_scale_total.png"
     params:
         output_dir=OUTPUT_DIR
     threads: 1
@@ -232,20 +236,19 @@ rule evaluation_final:
         """
 
 
-# Run benchmark for a single system 
-rule benchmark_system:
+# Run benchmark for all systems
+rule benchmark:
     input:
         config=CONFIG_FILE,
         params=f"{OUTPUT_DIR}/trained_parameters.pkl",
         composite=f"{OUTPUT_DIR}/composite_system.pkl"
     output:
-        temp(f"{OUTPUT_DIR}/benchmark_{{system}}.txt")  # Temporary per-system result
+        f"{OUTPUT_DIR}/benchmark_results.txt"
     params:
-        output_dir=OUTPUT_DIR,
-        system_name="{system}"
-    threads: 1  # Each system runs independently
+        output_dir=OUTPUT_DIR
+    threads: 1
     log:
-        f"{OUTPUT_DIR}/logs/benchmark_{{system}}.log"
+        f"{OUTPUT_DIR}/logs/benchmark.log"
     shell:
         """
         mkdir -p {params.output_dir}/logs
@@ -253,11 +256,7 @@ rule benchmark_system:
             --config {input.config} \
             --output-dir {params.output_dir} \
             --params-file {input.params} \
-            --system-name {params.system_name} \
             --log-file {log} 2>&1 | tee -a {log}
-        
-        # Create a simple marker file
-        echo "Benchmark completed for {params.system_name}" > {output}
         """
 
 # Rule: Export force field

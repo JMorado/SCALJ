@@ -173,6 +173,29 @@ Outputs:
             verbose=True,
         )
 
+        # Parse tuple results: (y_true, y_true_std, y_pred, y_pred_std)
+        if isinstance(results, tuple) and len(results) == 4:
+            y_true, y_true_std, y_pred, y_pred_std = results
+
+            # Convert tensors to floats
+            result_dict = {}
+
+            # Assuming order is [density, hvap] based on entries order
+            idx = 0
+            if density_ref is not None:
+                result_dict["density_ref"] = float(y_true[idx])
+                result_dict["density_pred"] = float(y_pred[idx])
+                result_dict["density_pred_std"] = float(y_pred_std[idx])
+                idx += 1
+
+            if hvap_ref is not None:
+                result_dict["hvap_ref"] = float(y_true[idx])
+                result_dict["hvap_pred"] = float(y_pred[idx])
+                result_dict["hvap_pred_std"] = float(y_pred_std[idx])
+
+            return result_dict
+
+        # Fallback for dict results (if API changes back)
         return results
 
     def run(self, args: argparse.Namespace) -> dict[str, Any]:
@@ -283,16 +306,18 @@ Outputs:
                 print(f"  Benchmark results for {system.name}:")
                 print(thermo_results)
 
-                # Process results from new API
-                if "error" not in thermo_results:
+                # Process results
+                if "error" not in thermo_results and thermo_results:
                     benchmark_results[system.name] = {
                         "density": {
                             "mean": thermo_results.get("density_pred", 0.0),
-                            "std": 0.0,  # New API doesn't support replicas yet
+                            "std": thermo_results.get("density_pred_std", 0.0),
+                            "ref": thermo_results.get("density_ref", 0.0),
                         },
                         "hvap": {
                             "mean": thermo_results.get("hvap_pred", 0.0),
-                            "std": 0.0,  # New API doesn't support replicas yet
+                            "std": thermo_results.get("hvap_pred_std", 0.0),
+                            "ref": thermo_results.get("hvap_ref", 0.0),
                         },
                     }
                     print(f"  ✓ Benchmark completed for {system.name}")
@@ -306,7 +331,7 @@ Outputs:
 
         # Save benchmark results
         benchmark_file = self._output_path(args.output_dir, "benchmark_results.txt")
-        with open(benchmark_file, "w") as f:
+        with open(benchmark_file, "w", encoding="utf-8") as f:
             f.write("Thermodynamic Benchmark Results\n")
             f.write("=" * 80 + "\n\n")
             for system_name, data in benchmark_results.items():
@@ -314,11 +339,15 @@ Outputs:
                 if "error" in data:
                     f.write(f"  Error: {data['error']}\n")
                 else:
+                    density_ref = data["density"].get("ref", 0.0)
+                    hvap_ref = data["hvap"].get("ref", 0.0)
                     f.write(
-                        f"  Density: {data['density']['mean']:.4f} ± {data['density']['std']:.4f} g/mL\n"
+                        f"  Density: {data['density']['mean']:.4f} ± {data['density']['std']:.4f} g/mL "
+                        f"(ref: {density_ref:.4f})\n"
                     )
                     f.write(
-                        f"  Hvap: {data['hvap']['mean']:.4f} ± {data['hvap']['std']:.4f} kcal/mol\n"
+                        f"  Hvap: {data['hvap']['mean']:.4f} ± {data['hvap']['std']:.4f} kcal/mol "
+                        f"(ref: {hvap_ref:.4f})\n"
                     )
                 f.write("\n")
 
