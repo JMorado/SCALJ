@@ -1,24 +1,24 @@
 # SCALeJ
 
-Lennard-Jones Parameter Fitting via Condensed-Phase Volume-Scaling.
+Lennard-Jones parameters fitting via condensed-phase volume scaling.
 
 ## Installation
 
-First, clone the repository:
+Clone the repository:
 
 ```bash
 git clone https://github.com/JMorado/SCALeJ.git
 cd SCALeJ
 ```
 
-Then, create a conda environment with all the required dependencies:
+Create a conda environment with all the required dependencies:
 
 ```bash
 conda env create -f environment.yaml
 conda activate scalej
 ```
 
-Finally, install SCALeJ in development mode:
+Install SCALeJ in development mode:
 
 ```bash
 pip install -e .
