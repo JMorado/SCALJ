@@ -11,8 +11,6 @@ from smee import TensorForceField, TensorSystem, TensorTopology
 _KELVIN = openmm.unit.kelvin
 _ATMOSPHERE = openmm.unit.atmosphere
 _FEMTOSECOND = openmm.unit.femtosecond
-_KCAL_PER_MOL = openmm.unit.kilocalories_per_mole
-_ANGSTROM = openmm.unit.angstrom
 _INV_PICOSECOND = 1.0 / openmm.unit.picoseconds
 
 

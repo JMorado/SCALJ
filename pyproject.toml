@@ -3,22 +3,21 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "scalj"
+name = "SCALeJ"
 version = "0.1.0"
-description = "A package for fitting Lennard-Jones parameters via volume-scaled condensed-phase simulations."
+description = "SCALeJ: Lennard-Jones Parameter Fitting via Condensed-Phase Volume-Scaling."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
     {name = "SCALJ Contributors"}
 ]
-keywords = ["molecular dynamics", "machine learning", "force field", "MACE", "Lennard-Jones", "parameter fitting"]
+keywords = ["molecular dynamics", "machine learning", "force field", "Lennard-Jones", "fitting"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -43,6 +42,8 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "pytest-mock>=3.10.0",
     "black>=22.0.0",
     "isort>=5.10.0",
     "mypy>=0.950",
@@ -50,15 +51,15 @@ dev = [
 ]
 
 [project.scripts]
-scalj = "scalj.cli.main:main"
+scalej = "scalej.cli.main:main"
 
 [project.urls]
-Homepage = "https://github.com/yourusername/scalj"
-Repository = "https://github.com/yourusername/scalj"
+Homepage = "https://github.com/JMorado/scalej"
+Repository = "https://github.com/JMorado/scalej"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["scalj*"]
+include = ["scalej*"]
 exclude = ["examples*", "tests*"]
 
 [tool.black]
@@ -76,3 +77,22 @@ target-version = "py39"
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP"]
 ignore = []
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--strict-markers",
+    "--cov=scalej",
+    "--cov-report=term-missing",
+    "--cov-report=html",
+]
+markers = [
+    "unit: Unit tests",
+    "integration: Integration tests",
+    "slow: Slow tests that may take significant time",
+]

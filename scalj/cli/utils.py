@@ -119,6 +119,9 @@ def generate_config(args):
         force_weight=1.0,
         reference="min",
         normalize=True,
+        energy_cutoff=20.0,
+        weighting_method="boltzmann",
+        weighting_temperature="2000 K",
     )
 
     example_parameters = cfg.ParameterConfig(
@@ -161,4 +164,4 @@ def generate_config(args):
 
     print(f"Example configuration saved to: {output_path}")
     print("\nYou can now edit this file and run:")
-    print(f"  scalj run --config {output_path}")
+    print(f"  scalej run --config {output_path}")
