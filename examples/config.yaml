@@ -3,24 +3,19 @@ general:
   - name: methanol
     components:
     - smiles: '[C:1]([H:3])([H:4])([H:5])[O:2][H:6]'
-      nmol: 250
-    weight: 1.0
-  - name: water
-    components:
-    - smiles: '[C:1]([H:3])([H:4])([H:5])[O:2][H:6]'
-      nmol: 250
+      nmol: 350
     weight: 1.0
   force_field_name: de-force-1.0.3.offxml
-  mlp_name: mace-off23-small
+  mlp_name: mace-off24-medium
   output_dir: output
 simulation:
   temperature: 300 K
   pressure: 1.0 atm
   timestep: 1.0 fs
   n_minimization_steps: 0
-  n_equilibration_nvt_steps: 500
-  n_equilibration_npt_steps: 500
-  n_production_steps: 1000
+  n_equilibration_nvt_steps: 50000
+  n_equilibration_npt_steps: 50000
+  n_production_steps: 1000000
   n_mlp_steps: 0
   mlp_device: cpu
   platform: CPU
@@ -33,11 +28,11 @@ scaling:
   equilibrium_range:
   - 0.9
   - 1.1
-  - 5
+  - 15
   long_range:
   - 1.1
   - 2.0
-  - 5
+  - 12
   subsample_frequency: 20
 training:
   learning_rate: 0.01
@@ -47,9 +42,9 @@ training:
   force_weight: 1.0
   reference: min
   normalize: true
-  energy_cutoff: 20.0 
+  energy_cutoff: 20.0
   weighting_method: boltzmann
-  weighting_temperature: 2000.0 K
+  weighting_temperature: 2000 K
 parameters:
   cols:
   - epsilon
