@@ -115,13 +115,32 @@ Outputs:
             else:
                 box_vectors_np = box_vectors
 
+            # Determine number of input frames
+            n_input_frames = coords_np.shape[0] if coords_np.ndim == 3 else 1
+
             # Generate scaled configurations
             print("Creating scaled configurations...")
+            print(f"  Input frames: {n_input_frames}")
+            print(f"  Scale factors: {len(scale_factors)}")
+            print(
+                f"  Total configurations to generate: {n_input_frames * len(scale_factors)}"
+            )
             coords_scaled, box_vectors_scaled = self._create_scaled_dataset(
                 tensor_system, coords_np, box_vectors_np, scale_factors
             )
 
             print(f"  Generated {len(coords_scaled)} scaled configurations")
+
+            # Create expanded scale factors array that matches the number of configurations
+            # When we have N input frames and M scale factors, we generate N×M configurations
+            # We need to repeat each scale factor N times to maintain the correspondence
+            if n_input_frames > 1:
+                expanded_scale_factors = np.repeat(scale_factors, n_input_frames)
+                print(
+                    f"  Expanded scale factors from {len(scale_factors)} to {len(expanded_scale_factors)} to match configurations"
+                )
+            else:
+                expanded_scale_factors = scale_factors
 
             # Save scaled data
             scaled_file = self._output_path(
@@ -130,7 +149,7 @@ Outputs:
             scaled_data = {
                 "coords_scaled": coords_scaled,
                 "box_vectors_scaled": box_vectors_scaled,
-                "scale_factors": scale_factors,
+                "scale_factors": expanded_scale_factors,  # Save expanded scale factors
                 "tensor_system": tensor_system,
                 "components": system_state.get("components", []),
             }
@@ -143,7 +162,7 @@ Outputs:
                 "n_configurations": len(coords_scaled),
             }
 
-        # Save scale factors
+        # Save scale factors (use unique values for the global file)
         if args.system_name:
             scale_factors_file = self._output_path(
                 args.output_dir, f"scale_factors_{args.system_name}.npy"
@@ -151,6 +170,7 @@ Outputs:
         else:
             scale_factors_file = self._output_path(args.output_dir, "scale_factors.npy")
 
+        # Save unique scale factors for reference (not expanded)
         np.save(scale_factors_file, scale_factors)
         print(f"\nScale factors saved: {scale_factors_file}")
 
@@ -291,10 +311,15 @@ Outputs:
             # Concatenate all scaled species coordinates
             if coords.ndim == 2:
                 full_scaled_coords = np.concatenate(scaled_slices, axis=0)
+                all_coords.append(full_scaled_coords)
+                all_box_vectors.append(final_scaled_box_vecs)
             else:
+                # Multiple frames: concatenate species and flatten frames into list
                 full_scaled_coords = np.concatenate(scaled_slices, axis=1)
-
-            all_coords.append(full_scaled_coords)
-            all_box_vectors.append(final_scaled_box_vecs)
+                # full_scaled_coords has shape (n_frames, n_atoms, 3)
+                # Unpack each frame into a separate list element
+                for frame_idx in range(full_scaled_coords.shape[0]):
+                    all_coords.append(full_scaled_coords[frame_idx])
+                    all_box_vectors.append(final_scaled_box_vecs[frame_idx])
 
         return all_coords, all_box_vectors

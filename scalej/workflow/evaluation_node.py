@@ -194,8 +194,10 @@ Outputs:
                 "r2": forces_r2,
             },
         }
+        # Remove trailing underscore from prefix for metrics filename
+        metrics_prefix = prefix.rstrip("_") if prefix else "evaluation"
         metrics_file = self._output_path(
-            args.output_dir, f"metrics_{prefix if prefix else 'evaluation'}.json"
+            args.output_dir, f"metrics_{metrics_prefix}.json"
         )
         with open(metrics_file, "w") as f:
             json.dump(metrics_data, f, indent=2)
@@ -242,8 +244,119 @@ Outputs:
             results["energy_parity"] = str(energy_parity_file)
             results["forces_parity"] = str(forces_parity_file)
 
+        # Collect all data for overall energy vs scale plot
+        if not args.system_name:
+            print("\nPreparing data for frame-based energy vs scale plots...")
+            all_frame_data = []  # List of (scale_factors, e_ref, e_pred, system, frame)
+
+            temp_offset = 0
+            for i, system_name in enumerate(all_tensor_systems.keys()):
+                temp_mask = all_mask_idxs[i].detach().cpu().numpy()
+                temp_n_points = len(temp_mask)
+
+                temp_e_ref = (
+                    energy_ref.detach()
+                    .cpu()
+                    .numpy()[temp_offset : temp_offset + temp_n_points]
+                )
+                temp_e_pred = (
+                    energy_pred.detach()
+                    .cpu()
+                    .numpy()[temp_offset : temp_offset + temp_n_points]
+                )
+
+                # Load scale factors for this system
+                ef_file = self._output_path(
+                    args.output_dir, f"energies_forces_{system_name}.pkl"
+                )
+                if ef_file.exists():
+                    try:
+                        ef_data = load_pickle(ef_file)
+                        system_scale_factors = ef_data.get("scale_factors")
+
+                        if system_scale_factors is not None:
+                            # Apply mask to scale factors
+                            filtered_scale_factors = system_scale_factors[temp_mask]
+
+                            # Determine unique scale factors and number of frames
+                            unique_scales = np.unique(filtered_scale_factors)
+                            n_unique = len(unique_scales)
+                            n_configs = len(filtered_scale_factors)
+                            n_frames = n_configs // n_unique
+
+                            print(
+                                f"  {system_name}: {n_frames} frames × "
+                                f"{n_unique} scale factors = {n_configs} configs"
+                            )
+
+                            # Extract data for each frame
+                            for frame_idx in range(n_frames):
+                                # Get indices for this frame across all scales
+                                frame_indices = np.arange(
+                                    frame_idx, n_configs, n_frames
+                                )
+                                frame_scales = filtered_scale_factors[frame_indices]
+                                frame_e_ref = temp_e_ref[frame_indices]
+                                frame_e_pred = temp_e_pred[frame_indices]
+
+                                all_frame_data.append(
+                                    {
+                                        "scale_factors": frame_scales,
+                                        "e_ref": frame_e_ref,
+                                        "e_pred": frame_e_pred,
+                                        "system": system_name,
+                                        "frame": frame_idx,
+                                    }
+                                )
+                    except Exception as e:
+                        print(
+                            f"  Warning: Could not process scale factors "
+                            f"for {system_name}: {e}"
+                        )
+
+                temp_offset += temp_n_points
+
+            # Generate per-frame plots (reference + predicted)
+            if all_frame_data:
+                print("\nGenerating per-frame energy vs scale plots...")
+                for frame_info in all_frame_data:
+                    frame_plot_file = self._output_path(
+                        args.output_dir,
+                        f"{prefix}energy_vs_scale_{frame_info['system']}_"
+                        f"frame{frame_info['frame']}.png",
+                    )
+                    plots.plot_energy_vs_scale(
+                        frame_info["scale_factors"],
+                        [frame_info["e_ref"], frame_info["e_pred"]],
+                        frame_plot_file,
+                        labels=["Reference", "Predicted"],
+                        lims=(0, 30),
+                    )
+                print(f"  Generated {len(all_frame_data)} per-frame plots\n")
+
+                # Generate overall plot (reference + predicted)
+                print("Generating overall energy vs scale plot...")
+                all_scales = np.concatenate(
+                    [f["scale_factors"] for f in all_frame_data]
+                )
+                all_e_ref = np.concatenate([f["e_ref"] for f in all_frame_data])
+                all_e_pred = np.concatenate([f["e_pred"] for f in all_frame_data])
+
+                overall_plot_file = self._output_path(
+                    args.output_dir, f"{prefix}energy_vs_scale_total.png"
+                )
+                plots.plot_energy_vs_scale(
+                    all_scales,
+                    [all_e_ref, all_e_pred],
+                    overall_plot_file,
+                    labels=["Reference", "Predicted"],
+                    lims=(0, 30),
+                )
+                print(f"  Overall plot: {overall_plot_file}")
+                results["overall_energy_vs_scale"] = str(overall_plot_file)
+
         # Generate per-system plots (either for all systems or just the specified one)
-        print("\nGenerating per-system plots...")
+        print("\nGenerating per-system parity plots...")
         offset = 0
         for i, system_name in enumerate(all_tensor_systems.keys()):
             mask = all_mask_idxs[i].detach().cpu().numpy()
@@ -265,7 +378,6 @@ Outputs:
             )
 
             # Per-system force parity plot
-            # TODO: change this to use only the forces for the current system
             parity_forces_file = self._output_path(
                 args.output_dir, f"parity_forces_{prefix}{system_name}.png"
             )
@@ -277,35 +389,11 @@ Outputs:
                 parity_forces_file,
             )
 
-            # Check if scale_factors.npy exists for energy vs scale plot
-            scale_factors_file = self._output_path(args.output_dir, "scale_factors.npy")
-            if scale_factors_file.exists():
-                scale_factors = np.load(scale_factors_file)
-
-                # Per-system energy vs scale plot
-                energy_vs_scale_file = self._output_path(
-                    args.output_dir, f"energy_vs_scale_{prefix}{system_name}.png"
-                )
-                plots.plot_energy_vs_scale(
-                    scale_factors[mask],
-                    [e_ref_sys, e_pred_sys],
-                    energy_vs_scale_file,
-                    labels=["Reference", "Predicted"],
-                    lims=(0, 30),
-                )
-            else:
-                energy_vs_scale_file = None
-                print(
-                    f"  scale_factors.npy not found, skipping "
-                    f"energy vs scale plot for {system_name}."
-                )
-
             results["per_system_plots"].append(
                 {
                     "system": system_name,
                     "parity_energy": str(parity_energy_file),
                     "parity_forces": str(parity_forces_file),
-                    "energy_vs_scale": str(energy_vs_scale_file),
                 }
             )
 

@@ -112,6 +112,8 @@ class ScalingConfig(BaseModel):
         (start, end, n_points) for long-range scaling.
     subsample_frequency : int
         Frequency for subsampling trajectory frames.
+    n_frames : int
+        Number of last frames to load from trajectory for scaling.
     """
 
     close_range: tuple[float, float, int] = pydantic.Field(
@@ -126,6 +128,9 @@ class ScalingConfig(BaseModel):
     )
     subsample_frequency: int = pydantic.Field(
         20, description="Frequency for subsampling trajectory frames."
+    )
+    n_frames: int = pydantic.Field(
+        1, description="Number of last frames to load from trajectory for scaling."
     )
 
 

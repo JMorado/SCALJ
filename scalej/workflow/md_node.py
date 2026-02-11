@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import openmm
 import openmm.app
 import openmm.unit
@@ -69,8 +70,8 @@ Outputs:
 
         # Load configuration
         config_dict = load_config(args.config)
-        general_config, simulation_config, _, _, _ = create_configs_from_dict(
-            config_dict
+        general_config, simulation_config, scaling_config, _, _ = (
+            create_configs_from_dict(config_dict)
         )
 
         self._ensure_output_dir(args.output_dir)
@@ -123,7 +124,9 @@ Outputs:
                 traj_path = Path(system.trajectory_path)
                 if not traj_path.exists():
                     raise FileNotFoundError(f"Trajectory not found: {traj_path}")
-                coords, box_vectors = self._load_last_frame(traj_path)
+                coords, box_vectors = self._load_last_frames(
+                    traj_path, scaling_config.n_frames
+                )
             else:
                 # Run simulation
                 print("Running MD simulation...")
@@ -140,8 +143,10 @@ Outputs:
                 )
                 print(f"  Trajectory saved: {trajectory_path}")
 
-                # Load last frame
-                coords, box_vectors = self._load_last_frame(trajectory_path)
+                # Load last frames
+                coords, box_vectors = self._load_last_frames(
+                    trajectory_path, scaling_config.n_frames
+                )
 
             # Setup and run MLP simulation if requested
             if not args.skip_mlp and simulation_config.n_mlp_steps > 0:
@@ -255,8 +260,25 @@ Outputs:
         return initial_coords, box_vectors
 
     @staticmethod
-    def _load_last_frame(trajectory_path):
-        """Load the last frame from a trajectory file."""
+    def _load_last_frames(trajectory_path, n_frames=1):
+        """Load the last N frames from a trajectory file.
+
+        Parameters
+        ----------
+        trajectory_path : Path or str
+            Path to the trajectory file.
+        n_frames : int
+            Number of last frames to load. Default is 1.
+
+        Returns
+        -------
+        coords_quantity : openmm.unit.Quantity
+            Coordinates array with shape (n_frames, n_atoms, 3) if n_frames > 1,
+            or (n_atoms, 3) if n_frames == 1.
+        box_vectors_quantity : openmm.unit.Quantity
+            Box vectors array with shape (n_frames, 3, 3) if n_frames > 1,
+            or (3, 3) if n_frames == 1.
+        """
         coords_list = []
         box_vectors_list = []
 
@@ -270,12 +292,36 @@ Outputs:
         if not coords_list:
             raise ValueError(f"No frames found in trajectory: {trajectory_path}")
 
-        last_coords = coords_list[-1]
-        last_box_vectors = box_vectors_list[-1]
+        total_frames = len(coords_list)
+        if n_frames > total_frames:
+            raise ValueError(
+                f"Requested {n_frames} frames but trajectory only has {total_frames} frames. "
+                f"Please reduce n_frames in the scaling config."
+            )
 
-        coords_quantity = last_coords.detach().cpu().numpy() * openmm.unit.angstrom
-        box_vectors_quantity = (
-            last_box_vectors.detach().cpu().numpy() * openmm.unit.angstrom
-        )
+        # Get the last n_frames
+        if n_frames == 1:
+            # Return single frame without batch dimension
+            last_coords = coords_list[-1]
+            last_box_vectors = box_vectors_list[-1]
+            coords_quantity = last_coords.detach().cpu().numpy() * openmm.unit.angstrom
+            box_vectors_quantity = (
+                last_box_vectors.detach().cpu().numpy() * openmm.unit.angstrom
+            )
+        else:
+            # Return multiple frames with batch dimension
+            selected_coords = coords_list[-n_frames:]
+            selected_box_vectors = box_vectors_list[-n_frames:]
 
+            coords_array = np.stack(
+                [c.detach().cpu().numpy() for c in selected_coords], axis=0
+            )
+            box_vectors_array = np.stack(
+                [b.detach().cpu().numpy() for b in selected_box_vectors], axis=0
+            )
+
+            coords_quantity = coords_array * openmm.unit.angstrom
+            box_vectors_quantity = box_vectors_array * openmm.unit.angstrom
+
+        print(f"  Loaded {n_frames} frame(s) from {total_frames} total frames")
         return coords_quantity, box_vectors_quantity
