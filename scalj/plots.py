@@ -1,4 +1,4 @@
-"""Plotting utilities for SCALJ."""
+"""Plotting utilities for SCALeJ."""
 
 from pathlib import Path
 

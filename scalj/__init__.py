@@ -1,17 +1,11 @@
-"""
-MACE-LJ Fitting Package
+"""SCALeJ: Lennard-Jones Parameter Fitting via Condensed-Phase Volume-Scaling."""
 
-A modular package for fitting Lennard-Jones parameters to MACE ML potential
-energies and forces using molecular dynamics simulations.
-"""
-
-from . import cli, config, dataset, utils
+from . import cli, config, workflow
 
 __version__ = "0.1.0"
 
 __all__ = [
     "config",
-    "dataset",
-    "utils",
     "cli",
+    "workflow",
 ]
