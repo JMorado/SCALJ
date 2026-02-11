@@ -176,8 +176,8 @@ rule training:
         """
 
 
-# Validate initial parameters (before training)
-rule validation_initial:
+# Evaluate initial parameters (before training)
+rule evaluation_initial:
     input:
         config=CONFIG_FILE,
         params=f"{OUTPUT_DIR}/initial_parameters.pkl",
@@ -191,11 +191,11 @@ rule validation_initial:
         output_dir=OUTPUT_DIR
     threads: 1
     log:
-        f"{OUTPUT_DIR}/logs/validation_initial.log"
+        f"{OUTPUT_DIR}/logs/evaluation_initial.log"
     shell:
         """
         mkdir -p {params.output_dir}/logs
-        scalj validation \
+        scalj evaluation \
             --config {input.config} \
             --output-dir {params.output_dir} \
             --params-file {input.params} \
@@ -204,8 +204,8 @@ rule validation_initial:
         """
 
 
-# Validate final parameters (after training)
-rule validation_final:
+# Evaluate final parameters (after training)
+rule evaluation_final:
     input:
         config=CONFIG_FILE,
         params=f"{OUTPUT_DIR}/trained_parameters.pkl",
@@ -219,11 +219,11 @@ rule validation_final:
         output_dir=OUTPUT_DIR
     threads: 1
     log:
-        f"{OUTPUT_DIR}/logs/validation_final.log"
+        f"{OUTPUT_DIR}/logs/evaluation_final.log"
     shell:
         """
         mkdir -p {params.output_dir}/logs
-        scalj validation \
+        scalj evaluation \
             --config {input.config} \
             --output-dir {params.output_dir} \
             --params-file {input.params} \

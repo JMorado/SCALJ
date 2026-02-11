@@ -31,7 +31,7 @@ class TrainingNode(PredictionBaseNode):
     - config: Training parameters (learning_rate, n_epochs, etc.)
 
     Outputs:
-    - initial_parameters.pkl: Parameters before training (for initial validation)
+    - initial_parameters.pkl: Parameters before training (for initial evaluation)
     - trained_parameters.pkl: Optimized parameters after training
     - training_losses.png: Training loss curves
     """
@@ -50,7 +50,7 @@ Inputs:
 - config: Training parameters (learning_rate, n_epochs, etc.)
 
 Outputs:
-- initial_parameters.pkl: Parameters before training (for initial validation)
+- initial_parameters.pkl: Parameters before training (for initial evaluation)
 - trained_parameters.pkl: Optimized parameters after training
 - training_losses.png: Training loss curves"""
 
@@ -525,7 +525,7 @@ Outputs:
             composite_tensor_forcefield.potentials_by_type["vdW"]
         )
 
-        # Save initial parameters for initial validation
+        # Save initial parameters for initial evaluation
         initial_params_file = self._output_path(
             args.output_dir, "initial_parameters.pkl"
         )

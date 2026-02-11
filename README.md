@@ -38,7 +38,7 @@ scalej --help
 #   ml_potential  - Compute ML potential energies and forces
 #   dataset       - Prepare combined datasets
 #   training      - Train LJ parameters
-#   validation    - Validate parameters and generate plots
+#   evaluation    - Evaluate parameters and generate plots
 #   export        - Export optimized force field
 #   benchmark     - Calculate thermodynamic properties
 
@@ -75,6 +75,6 @@ This executes all workflow steps:
 4. ML potential energy/force calculations (parallelized per system)
 5. Dataset preparation and combination
 6. Parameter training on combined dataset
-7. Validation of initial and optimized parameters
+7. Evaluation of initial and optimized parameters
 8. Force field export
 9. Benchmarking (parallelized per system)

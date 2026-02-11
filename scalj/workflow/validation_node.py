@@ -1,6 +1,7 @@
-"""Validation node for predictions and plotting."""
+"""Evaluation node for predictions and plotting."""
 
 import argparse
+import json
 import pickle
 from pathlib import Path
 from typing import Any
@@ -13,16 +14,16 @@ from ._utils import load_pickle
 from .base_nodes import PredictionBaseNode
 
 
-class ValidationNode(PredictionBaseNode):
+class EvaluationNode(PredictionBaseNode):
     """
-    Validation node for generating predictions and plots.
+    Evaluation node for generating predictions and plots.
 
     Inputs:
     - trained_parameters.pkl: Trained parameters (from TrainingNode or elsewhere)
     - combined_dataset.pkl: Combined dataset from DatasetNode
     - composite_system.pkl: Composite system from DatasetNode
     - scale_factors.npy: (optional) Scale factors for energy vs scale plots
-    - config: Validation settings
+    - config.yaml: Evaluation settings (energy cutoff, device, etc.)
 
     Outputs:
     - parity_energy_*.png: Energy parity plots
@@ -32,22 +33,23 @@ class ValidationNode(PredictionBaseNode):
 
     @classmethod
     def name(cls) -> str:
-        return "validation"
+        return "evaluation"
 
     @classmethod
     def description(cls) -> str:
-        return """Validation node for generating parity plots and validation metrics.
+        return """Evaluation node for generating parity plots and evaluation metrics.
 
 Inputs:
-- trained_parameters.pkl (or initial_parameters.pkl): Parameters to validate
+- trained_parameters.pkl (or initial_parameters.pkl): Parameters to evaluate
 - combined_dataset.pkl: Dataset from DatasetNode
 - composite_system.pkl: Composite system from DatasetNode
-- config: Validation settings
+- config: Evaluation settings
 
 Outputs:
 - parity_energy_*.png: Energy parity plots
 - parity_forces_*.png: Force parity plots
-- energy_vs_scale_*.png: (optional) Energy vs scale factor plots per system"""
+- energy_vs_scale_*.png: (optional) Energy vs scale factor plots per system
+- metrics_*.json: Evaluation metrics (MAE, RMSE, R²)"""
 
     @classmethod
     def add_arguments(cls, parser: argparse.ArgumentParser) -> None:
@@ -71,7 +73,7 @@ Outputs:
 
     def run(self, args: argparse.Namespace) -> dict[str, Any]:
         """
-        Run the validation node.
+        Run the evaluation node.
 
         Parameters
         ----------
@@ -84,7 +86,7 @@ Outputs:
             Dictionary containing paths to generated plots and any relevant metrics.
         """
         print("=" * 80)
-        print("ValidationNode: Prediction and Plotting")
+        print("EvaluationNode: Prediction and Plotting")
         print("=" * 80)
 
         # Load configuration
@@ -156,6 +158,57 @@ Outputs:
 
         prefix = args.plot_prefix if args.plot_prefix else ""
         results = {"per_system_plots": []}
+
+        # Calculate overall error metrics
+        energy_ref_np = energy_ref.detach().cpu().numpy()
+        energy_pred_np = energy_pred.detach().cpu().numpy()
+        forces_ref_np = forces_ref.flatten().detach().cpu().numpy()
+        forces_pred_np = forces_pred.flatten().detach().cpu().numpy()
+
+        energy_mae = float(np.mean(np.abs(energy_pred_np - energy_ref_np)))
+        energy_rmse = float(np.sqrt(np.mean((energy_pred_np - energy_ref_np) ** 2)))
+        energy_r2 = float(
+            1
+            - np.sum((energy_ref_np - energy_pred_np) ** 2)
+            / np.sum((energy_ref_np - np.mean(energy_ref_np)) ** 2)
+        )
+
+        forces_mae = float(np.mean(np.abs(forces_pred_np - forces_ref_np)))
+        forces_rmse = float(np.sqrt(np.mean((forces_pred_np - forces_ref_np) ** 2)))
+        forces_r2 = float(
+            1
+            - np.sum((forces_ref_np - forces_pred_np) ** 2)
+            / np.sum((forces_ref_np - np.mean(forces_ref_np)) ** 2)
+        )
+
+        # Save metrics to file
+        metrics_data = {
+            "energy": {
+                "mae": energy_mae,
+                "rmse": energy_rmse,
+                "r2": energy_r2,
+            },
+            "forces": {
+                "mae": forces_mae,
+                "rmse": forces_rmse,
+                "r2": forces_r2,
+            },
+        }
+        metrics_file = self._output_path(
+            args.output_dir, f"metrics_{prefix if prefix else 'evaluation'}.json"
+        )
+        with open(metrics_file, "w") as f:
+            json.dump(metrics_data, f, indent=2)
+        print(f"\nMetrics saved to: {metrics_file}")
+        print(
+            f"  Energy - MAE: {energy_mae:.4f}, RMSE: {energy_rmse:.4f}, R²: {energy_r2:.4f}"
+        )
+        print(
+            f"  Forces - MAE: {forces_mae:.4f}, RMSE: {forces_rmse:.4f}, R²: {forces_r2:.4f}"
+        )
+
+        results["metrics"] = metrics_data
+        results["metrics_file"] = str(metrics_file)
 
         if not args.system_name:
             # Generate overall plots when processing all systems

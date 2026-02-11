@@ -26,12 +26,9 @@ Examples:
   scalej ml_potential --config config.yaml --output-dir output
   scalej dataset --config config.yaml --output-dir output
   scalej training --config config.yaml --output-dir output
-  scalej validation --config config.yaml --output-dir output
+  scalej evaluation --config config.yaml --output-dir output
   scalej export --config config.yaml --output-dir output
   scalej benchmark --config config.yaml --output-dir output
-  
-  # Or use legacy evaluation node (runs validation + export + benchmark)
-  scalej evaluation --config config.yaml --output-dir output
   
   # Run with Snakemake (recommended for parallel execution)
   snakemake --cores 1 --configfile config.yaml
@@ -77,7 +74,6 @@ def _add_node_subcommands(subparsers):
     from ..workflow.ml_potential_node import MLPotentialNode
     from ..workflow.scaling_node import ScalingNode
     from ..workflow.training_node import TrainingNode
-    from ..workflow.validation_node import ValidationNode
 
     # Define all workflow nodes
     nodes = [
@@ -86,10 +82,9 @@ def _add_node_subcommands(subparsers):
         MLPotentialNode,
         DatasetNode,
         TrainingNode,
-        ValidationNode,  # NEW: Reusable prediction & plotting
-        ExportNode,  # NEW: FF export
-        BenchmarkNode,  # NEW: Thermodynamic benchmarks
-        EvaluationNode,  # LEGACY: Convenience wrapper (runs all 3 above)
+        EvaluationNode,
+        ExportNode,
+        BenchmarkNode,
     ]
 
     # Create a subcommand for each node

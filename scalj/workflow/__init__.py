@@ -10,7 +10,6 @@ from .ml_potential_node import MLPotentialNode
 from .node import WorkflowNode
 from .scaling_node import ScalingNode
 from .training_node import TrainingNode
-from .validation_node import ValidationNode
 
 __all__ = [
     "WorkflowNode",
@@ -21,8 +20,7 @@ __all__ = [
     "MLPotentialNode",
     "DatasetNode",
     "TrainingNode",
-    "ValidationNode",
+    "EvaluationNode",
     "ExportNode",
     "BenchmarkNode",
-    "EvaluationNode",
 ]
