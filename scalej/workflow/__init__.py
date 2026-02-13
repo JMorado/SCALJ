@@ -1,6 +1,5 @@
 """Workflow node system for modular SCALeJ execution."""
 
-from .base_nodes import MLPotentialBaseNode, PredictionBaseNode
 from .benchmark_node import BenchmarkNode
 from .dataset_node import DatasetNode
 from .evaluation_node import EvaluationNode
@@ -15,8 +14,6 @@ from .training_node import TrainingNode
 
 __all__ = [
     "WorkflowNode",
-    "MLPotentialBaseNode",
-    "PredictionBaseNode",
     "SystemSetupNode",
     "MDNode",
     "MLPMDNode",

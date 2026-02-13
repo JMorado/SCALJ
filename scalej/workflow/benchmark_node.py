@@ -9,7 +9,7 @@ import descent.targets.thermo
 import torch
 
 from ..cli.utils import create_configs_from_dict, load_config
-from ._utils import load_pickle
+from ..io import load_pickle
 from .node import WorkflowNode
 
 

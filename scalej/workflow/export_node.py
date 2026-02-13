@@ -9,8 +9,7 @@ from openff.toolkit import ForceField
 from ..cli.utils import create_configs_from_dict, load_config
 
 # Import API function
-from ..io import export_forcefield_to_offxml
-from ._utils import load_pickle
+from ..io import export_forcefield_to_offxml, load_pickle
 from .node import WorkflowNode
 
 

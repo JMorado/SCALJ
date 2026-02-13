@@ -1,15 +1,15 @@
 """ML potential energy and force computation node."""
 
 import argparse
-from pathlib import Path
 from typing import Any
 
+from .. import energy
 from ..cli.utils import create_configs_from_dict, load_config
-from ._utils import load_pickle, save_pickle
-from .base_nodes import MLPotentialBaseNode
+from ..io import load_pickle, save_pickle
+from .node import WorkflowNode
 
 
-class MLPotentialNode(MLPotentialBaseNode):
+class MLPotentialNode(WorkflowNode):
     """
     MLPotential node for computing energies and forces using a machine learning potential.
 
@@ -98,20 +98,22 @@ Outputs:
 
             print(f"Loaded {len(coords_scaled)} scaled configurations")
 
-            # Setup ML potential simulation with smee
+            # Setup ML potential simulation using API
             print("Setting up ML potential...")
-            mlp_simulation = self._setup_mlp_simulation(
+            mlp_simulation = energy.setup_mlp_simulation(
                 tensor_system,
                 general_config.mlp_name,
                 mlp_device=simulation_config.mlp_device,
                 platform=simulation_config.platform,
             )
 
-            # Compute energies and forces using smee (differentiable)
+            # Compute energies and forces using API
             print("Computing energies and forces...")
-            energies, forces = self._compute_energies_forces(
+            ef_result = energy.compute_mlp_energies_forces(
                 mlp_simulation, coords_scaled, box_vectors_scaled
             )
+            energies = ef_result.energies
+            forces = ef_result.forces
 
             print(f"  Computed energies: {len(energies)} configurations")
             print(f"  Energy shape: {energies.shape}")

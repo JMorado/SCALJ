@@ -4,18 +4,13 @@ import argparse
 from pathlib import Path
 from typing import Any
 
-import numpy as np
-import openmm
-import openmm.unit
-import smee.mm
-from tqdm import tqdm
-
+from .. import energy, simulation
 from ..cli.utils import create_configs_from_dict, load_config
-from ._utils import load_pickle, save_pickle
-from .base_nodes import MLPotentialBaseNode
+from ..io import load_pickle, save_pickle
+from .node import WorkflowNode
 
 
-class MLPMDNode(MLPotentialBaseNode):
+class MLPMDNode(WorkflowNode):
     """
     MLP MD node for running ML potential relaxation on trajectory frames.
 
@@ -117,17 +112,19 @@ Outputs:
                 raise FileNotFoundError(f"Trajectory not found: {trajectory_path}")
 
             print(f"Loading trajectory: {trajectory_path}")
-            coords, box_vectors = self._load_last_frames(
-                trajectory_path, scaling_config.n_frames
+            frames = simulation.load_trajectory_frames(
+                trajectory_path, n_frames=scaling_config.n_frames
             )
+            coords = frames.coords
+            box_vectors = frames.box_vectors
 
-            # Run MLP simulation
+            # Run MLP simulation using API
             print("\nRunning MLP relaxation...")
             print(f"  MLP: {general_config.mlp_name}")
             print(f"  Device: {simulation_config.mlp_device}")
             print(f"  Steps: {simulation_config.n_mlp_steps}")
 
-            mlp_simulation = self._setup_mlp_simulation(
+            mlp_simulation = energy.setup_mlp_simulation(
                 tensor_system,
                 general_config.mlp_name,
                 temperature=simulation_config.temperature,
@@ -137,7 +134,7 @@ Outputs:
                 platform=simulation_config.platform,
             )
 
-            coords_relaxed, box_vectors_relaxed = self._run_mlp_simulation(
+            coords_relaxed, box_vectors_relaxed = energy.run_mlp_relaxation(
                 mlp_simulation, coords, box_vectors, simulation_config.n_mlp_steps
             )
 
@@ -177,70 +174,3 @@ Outputs:
 
         # Priority 3: Default location from MDNode output
         return str(self._output_path(args.output_dir, f"trajectory_{system.name}.dcd"))
-
-    @staticmethod
-    def _load_last_frames(trajectory_path, n_frames=1):
-        """Load the last N frames from a trajectory file.
-
-        Parameters
-        ----------
-        trajectory_path : Path or str
-            Path to the trajectory file.
-        n_frames : int
-            Number of last frames to load. Default is 1.
-
-        Returns
-        -------
-        coords_quantity : openmm.unit.Quantity
-            Coordinates array with shape (n_frames, n_atoms, 3) if n_frames > 1,
-            or (n_atoms, 3) if n_frames == 1.
-        box_vectors_quantity : openmm.unit.Quantity
-            Box vectors array with shape (n_frames, 3, 3) if n_frames > 1,
-            or (3, 3) if n_frames == 1.
-        """
-        coords_list = []
-        box_vectors_list = []
-
-        with open(trajectory_path, "rb") as f:
-            for coord, box_vector, _, kinetic in tqdm(
-                smee.mm._reporters.unpack_frames(f), desc="Loading trajectory"
-            ):
-                coords_list.append(coord)
-                box_vectors_list.append(box_vector)
-
-        if not coords_list:
-            raise ValueError(f"No frames found in trajectory: {trajectory_path}")
-
-        total_frames = len(coords_list)
-        if n_frames > total_frames:
-            raise ValueError(
-                f"Requested {n_frames} frames but trajectory only has "
-                f"{total_frames} frames. Please reduce n_frames in scaling config."
-            )
-
-        # Get the last n_frames
-        if n_frames == 1:
-            # Return single frame without batch dimension
-            last_coords = coords_list[-1]
-            last_box_vectors = box_vectors_list[-1]
-            coords_quantity = last_coords.detach().cpu().numpy() * openmm.unit.angstrom
-            box_vectors_quantity = (
-                last_box_vectors.detach().cpu().numpy() * openmm.unit.angstrom
-            )
-        else:
-            # Return multiple frames with batch dimension
-            selected_coords = coords_list[-n_frames:]
-            selected_box_vectors = box_vectors_list[-n_frames:]
-
-            coords_array = np.stack(
-                [c.detach().cpu().numpy() for c in selected_coords], axis=0
-            )
-            box_vectors_array = np.stack(
-                [b.detach().cpu().numpy() for b in selected_box_vectors], axis=0
-            )
-
-            coords_quantity = coords_array * openmm.unit.angstrom
-            box_vectors_quantity = box_vectors_array * openmm.unit.angstrom
-
-        print(f"  Loaded {n_frames} frame(s) from {total_frames} total frames")
-        return coords_quantity, box_vectors_quantity

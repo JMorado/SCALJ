@@ -2,19 +2,18 @@
 
 import argparse
 import json
-import pickle
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
-from .. import plots
+from .. import evaluation, plots, training
 from ..cli.utils import create_configs_from_dict, load_config
-from ._utils import load_pickle
-from .base_nodes import PredictionBaseNode
+from ..io import load_pickle
+from .node import WorkflowNode
 
 
-class EvaluationNode(PredictionBaseNode):
+class EvaluationNode(WorkflowNode):
     """
     Evaluation node for generating predictions and plots.
 
@@ -144,54 +143,47 @@ Outputs:
         print(f"  Energy cutoff: {training_config.energy_cutoff} kcal/mol")
         print(f"  Device: {training_config.device}")
 
-        energy_ref, energy_pred, forces_ref, forces_pred, _, _, all_mask_idxs = (
-            self._predict(
-                combined_dataset,
-                force_field.to(training_config.device),
-                all_tensor_systems=all_tensor_systems,
-                reference=training_config.reference,
-                normalize=False,
-                device=training_config.device,
-                energy_cutoff=training_config.energy_cutoff,
-            )
+        # Use API function directly
+        prediction = training.predict_energies_forces(
+            combined_dataset,
+            force_field.to(training_config.device),
+            all_tensor_systems,
+            reference=training_config.reference,
+            normalize=False,
+            device=training_config.device,
+            energy_cutoff=training_config.energy_cutoff,
         )
+
+        energy_ref = prediction.energy_ref
+        energy_pred = prediction.energy_pred
+        forces_ref = prediction.forces_ref
+        forces_pred = prediction.forces_pred
+        all_mask_idxs = prediction.mask_idxs
 
         prefix = args.plot_prefix if args.plot_prefix else ""
         results = {"per_system_plots": []}
 
-        # Calculate overall error metrics
+        # Calculate error metrics using API function
         energy_ref_np = energy_ref.detach().cpu().numpy()
         energy_pred_np = energy_pred.detach().cpu().numpy()
         forces_ref_np = forces_ref.flatten().detach().cpu().numpy()
         forces_pred_np = forces_pred.flatten().detach().cpu().numpy()
 
-        energy_mae = float(np.mean(np.abs(energy_pred_np - energy_ref_np)))
-        energy_rmse = float(np.sqrt(np.mean((energy_pred_np - energy_ref_np) ** 2)))
-        energy_r2 = float(
-            1
-            - np.sum((energy_ref_np - energy_pred_np) ** 2)
-            / np.sum((energy_ref_np - np.mean(energy_ref_np)) ** 2)
-        )
-
-        forces_mae = float(np.mean(np.abs(forces_pred_np - forces_ref_np)))
-        forces_rmse = float(np.sqrt(np.mean((forces_pred_np - forces_ref_np) ** 2)))
-        forces_r2 = float(
-            1
-            - np.sum((forces_ref_np - forces_pred_np) ** 2)
-            / np.sum((forces_ref_np - np.mean(forces_ref_np)) ** 2)
+        metrics = evaluation.compute_metrics_from_arrays(
+            energy_ref_np, energy_pred_np, forces_ref_np, forces_pred_np
         )
 
         # Save metrics to file
         metrics_data = {
             "energy": {
-                "mae": energy_mae,
-                "rmse": energy_rmse,
-                "r2": energy_r2,
+                "mae": metrics.energy_mae,
+                "rmse": metrics.energy_rmse,
+                "r2": metrics.energy_r2,
             },
             "forces": {
-                "mae": forces_mae,
-                "rmse": forces_rmse,
-                "r2": forces_r2,
+                "mae": metrics.forces_mae,
+                "rmse": metrics.forces_rmse,
+                "r2": metrics.forces_r2,
             },
         }
         # Remove trailing underscore from prefix for metrics filename
@@ -203,10 +195,10 @@ Outputs:
             json.dump(metrics_data, f, indent=2)
         print(f"\nMetrics saved to: {metrics_file}")
         print(
-            f"  Energy - MAE: {energy_mae:.4f}, RMSE: {energy_rmse:.4f}, R²: {energy_r2:.4f}"
+            f"  Energy - MAE: {metrics.energy_mae:.4f}, RMSE: {metrics.energy_rmse:.4f}, R²: {metrics.energy_r2:.4f}"
         )
         print(
-            f"  Forces - MAE: {forces_mae:.4f}, RMSE: {forces_rmse:.4f}, R²: {forces_r2:.4f}"
+            f"  Forces - MAE: {metrics.forces_mae:.4f}, RMSE: {metrics.forces_rmse:.4f}, R²: {metrics.forces_r2:.4f}"
         )
 
         results["metrics"] = metrics_data

@@ -5,16 +5,14 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-import openmm
 import openmm.unit
-import smee.mm
-from tqdm import tqdm
 
 from ..cli.utils import create_configs_from_dict, load_config
+from ..io import load_pickle, save_pickle
 
 # Import API functions
 from ..scaling import create_scaled_configurations, generate_scale_factors
-from ._utils import load_pickle, save_pickle
+from ..simulation import load_trajectory_frames
 from .node import WorkflowNode
 
 
@@ -236,7 +234,8 @@ Outputs:
 
         if trajectory_path and trajectory_path.exists():
             print(f"Loading trajectory: {trajectory_path}")
-            return self._load_last_frames(trajectory_path, n_frames)
+            frames = load_trajectory_frames(trajectory_path, n_frames=n_frames)
+            return frames.coords, frames.box_vectors
 
         # Backward compatibility: coords in system_state (old format)
         if "coords" in system_state and "box_vectors" in system_state:
@@ -247,54 +246,6 @@ Outputs:
             f"No coordinate source found for system '{system.name}'. "
             "Run MDNode or provide --trajectory or --mlp-coords."
         )
-
-    @staticmethod
-    def _load_last_frames(trajectory_path, n_frames=1):
-        """Load the last N frames from a trajectory file."""
-        coords_list = []
-        box_vectors_list = []
-
-        with open(trajectory_path, "rb") as f:
-            for coord, box_vector, _, kinetic in tqdm(
-                smee.mm._reporters.unpack_frames(f), desc="Loading trajectory"
-            ):
-                coords_list.append(coord)
-                box_vectors_list.append(box_vector)
-
-        if not coords_list:
-            raise ValueError(f"No frames found in trajectory: {trajectory_path}")
-
-        total_frames = len(coords_list)
-        if n_frames > total_frames:
-            raise ValueError(
-                f"Requested {n_frames} frames but trajectory only has "
-                f"{total_frames} frames. Please reduce n_frames in scaling config."
-            )
-
-        # Get the last n_frames
-        if n_frames == 1:
-            last_coords = coords_list[-1]
-            last_box_vectors = box_vectors_list[-1]
-            coords_quantity = last_coords.detach().cpu().numpy() * openmm.unit.angstrom
-            box_vectors_quantity = (
-                last_box_vectors.detach().cpu().numpy() * openmm.unit.angstrom
-            )
-        else:
-            selected_coords = coords_list[-n_frames:]
-            selected_box_vectors = box_vectors_list[-n_frames:]
-
-            coords_array = np.stack(
-                [c.detach().cpu().numpy() for c in selected_coords], axis=0
-            )
-            box_vectors_array = np.stack(
-                [b.detach().cpu().numpy() for b in selected_box_vectors], axis=0
-            )
-
-            coords_quantity = coords_array * openmm.unit.angstrom
-            box_vectors_quantity = box_vectors_array * openmm.unit.angstrom
-
-        print(f"  Loaded {n_frames} frame(s) from {total_frames} total frames")
-        return coords_quantity, box_vectors_quantity
 
     # Note: Scaling functions (generate_scale_factors, compute_molecule_coms,
     # get_box_center, scale_molecule_positions, create_scaled_configurations)

@@ -1,15 +1,11 @@
-"""System setup node for creating system state from configuration."""
+"""System setup node."""
 
 import argparse
 from typing import Any
 
-import smee
-import smee.converters
-from openff.interchange import Interchange
-from openff.toolkit import ForceField, Molecule
-
+from .. import systems
 from ..cli.utils import create_configs_from_dict, load_config
-from ._utils import save_pickle
+from ..io import save_pickle
 from .node import WorkflowNode
 
 
@@ -62,38 +58,35 @@ Outputs:
 
         self._ensure_output_dir(args.output_dir)
 
-        # Load force field
-        force_field = ForceField(general_config.force_field_name, load_plugins=True)
         print(f"Force field: {general_config.force_field_name}")
 
         # Filter systems if requested
-        systems = general_config.systems
+        systems_to_process = general_config.systems
         if args.system_name:
-            systems = [s for s in systems if s.name == args.system_name]
-            if not systems:
+            systems_to_process = [
+                s for s in systems_to_process if s.name == args.system_name
+            ]
+            if not systems_to_process:
                 raise ValueError(f"System '{args.system_name}' not found in config")
 
         results = {}
 
-        for system in systems:
+        for system in systems_to_process:
             print(f"\n{'=' * 80}")
             print(f"Processing system: {system.name}")
             print(f"{'=' * 80}")
 
-            # Create molecules and interchanges
-            mols = [Molecule.from_smiles(comp.smiles) for comp in system.components]
-            interchanges = [
-                Interchange.from_smirnoff(force_field, [mol]) for mol in mols
-            ]
-
-            # Create tensor forcefield and topologies
-            tensor_forcefield, topologies = smee.converters.convert_interchange(
-                interchanges
-            )
-
-            # Create tensor system
+            # Create system from SMILES using the public API
+            smiles_list = [comp.smiles for comp in system.components]
             nmol_list = [comp.nmol for comp in system.components]
-            tensor_system = smee.TensorSystem(topologies, nmol_list, is_periodic=True)
+
+            tensor_system, tensor_forcefield, topologies = (
+                systems.create_system_from_smiles(
+                    smiles_list,
+                    nmol_list,
+                    forcefield_name=general_config.force_field_name,
+                )
+            )
 
             print("Components:")
             for comp in system.components:

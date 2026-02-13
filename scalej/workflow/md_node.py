@@ -4,14 +4,9 @@ import argparse
 from pathlib import Path
 from typing import Any
 
-import openmm
-import openmm.app
-import openmm.unit
-import smee
-import smee.mm
-
+from .. import simulation
 from ..cli.utils import create_configs_from_dict, load_config
-from ._utils import load_pickle
+from ..io import load_pickle
 from .node import WorkflowNode
 
 
@@ -120,18 +115,24 @@ Outputs:
                 args.output_dir, f"trajectory_{system.name}.dcd"
             )
 
-            # Run simulation
+            # Run simulation using the public API
             print("\nRunning MD simulation...")
             print(f"  Platform: {simulation_config.platform}")
             print(f"  Temperature: {simulation_config.temperature}")
             print(f"  Pressure: {simulation_config.pressure}")
             print(f"  Production steps: {simulation_config.n_production_steps}")
 
-            self._run_md_simulation(
+            simulation.run_md_simulation(
                 tensor_system,
                 tensor_forcefield,
                 trajectory_path,
-                simulation_config,
+                temperature=simulation_config.temperature,
+                pressure=simulation_config.pressure,
+                timestep=simulation_config.timestep,
+                n_equilibration_nvt_steps=simulation_config.n_equilibration_nvt_steps,
+                n_equilibration_npt_steps=simulation_config.n_equilibration_npt_steps,
+                n_production_steps=simulation_config.n_production_steps,
+                report_interval=simulation_config.report_interval,
             )
             print(f"  Trajectory saved: {trajectory_path}")
 
@@ -144,63 +145,3 @@ Outputs:
         print(f"{'=' * 80}")
 
         return results
-
-    @staticmethod
-    def _run_md_simulation(system, force_field, output_path, config):
-        """Run OpenMM MD simulation with smee."""
-        output_path = Path(output_path)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # Compute beta
-        beta = 1.0 / (openmm.unit.MOLAR_GAS_CONSTANT_R * config.temperature)
-
-        # Equilibration configurations
-        equilibrate_config = [
-            smee.mm.MinimizationConfig(),
-            smee.mm.SimulationConfig(
-                temperature=config.temperature,
-                pressure=None,
-                n_steps=config.n_equilibration_nvt_steps,
-                timestep=config.timestep,
-            ),
-            smee.mm.SimulationConfig(
-                temperature=config.temperature,
-                pressure=config.pressure,
-                n_steps=config.n_equilibration_npt_steps,
-                timestep=config.timestep,
-            ),
-        ]
-
-        # Production configuration
-        production_config = smee.mm.SimulationConfig(
-            temperature=config.temperature,
-            pressure=config.pressure,
-            n_steps=config.n_production_steps,
-            timestep=config.timestep,
-        )
-
-        # Generate initial coordinates
-        initial_coords, box_vectors = smee.mm.generate_system_coords(
-            system, force_field
-        )
-
-        # Set up reporters
-        pdb_reporter_file = output_path.parent / f"trajectory_{output_path.stem}.pdb"
-        pdb_reporter = openmm.app.PDBReporter(
-            pdb_reporter_file.as_posix(), config.report_interval
-        )
-
-        with smee.mm.tensor_reporter(
-            output_path, config.report_interval, beta, config.pressure
-        ) as tensor_reporter:
-            smee.mm.simulate(
-                system,
-                force_field,
-                initial_coords,
-                box_vectors,
-                equilibrate_config,
-                production_config,
-                [tensor_reporter, pdb_reporter],
-            )
-
-        return initial_coords, box_vectors
