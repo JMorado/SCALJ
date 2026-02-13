@@ -7,8 +7,13 @@ from typing import Any
 import numpy as np
 import openmm
 import openmm.unit
+import smee.mm
+from tqdm import tqdm
 
 from ..cli.utils import create_configs_from_dict, load_config
+
+# Import API functions
+from ..scaling import create_scaled_configurations, generate_scale_factors
 from ._utils import load_pickle, save_pickle
 from .node import WorkflowNode
 
@@ -18,12 +23,13 @@ class ScalingNode(WorkflowNode):
     Scaling node for generating scaled configurations for LJ parameter fitting.
 
     Inputs:
-    - system_{system}.pkl: System state from MDNode
+    - system_{system}.pkl: System state from SystemSetupNode
+    - trajectory_{system}.dcd OR mlp_coords_{system}.pkl: Coordinates source
     - config: Scaling parameters
 
     Outputs:
     - scaled_{system}.pkl: Scaled coordinates and box vectors
-    - scale_factors.npy: Scale factors array
+    - scale_factors_{system}.npy: Scale factors array
     """
 
     @classmethod
@@ -32,15 +38,16 @@ class ScalingNode(WorkflowNode):
 
     @classmethod
     def description(cls) -> str:
-        return """Scaling node for generating scaled configurations for LJ parameter fitting.
+        return """Scaling node for generating scaled configurations.
 
 Inputs:
-- system_{system}.pkl: System state from MDNode
+- system_{system}.pkl: System state from SystemSetupNode
+- trajectory or mlp_coords file: Coordinates source
 - config: Scaling parameters
 
 Outputs:
 - scaled_{system}.pkl: Scaled coordinates and box vectors
-- scale_factors.npy: Scale factors array"""
+- scale_factors_{system}.npy: Scale factors array"""
 
     @classmethod
     def add_arguments(cls, parser: argparse.ArgumentParser) -> None:
@@ -53,6 +60,16 @@ Outputs:
             "--system-file",
             type=str,
             help="Path to system pickle file (if not using default naming)",
+        )
+        parser.add_argument(
+            "--trajectory",
+            type=str,
+            help="Path to trajectory file (overrides config/default)",
+        )
+        parser.add_argument(
+            "--mlp-coords",
+            type=str,
+            help="Path to MLP coords file (if using MLP relaxed frames)",
         )
 
     def run(self, args: argparse.Namespace) -> dict[str, Any]:
@@ -73,7 +90,12 @@ Outputs:
         print(f"  Equilibrium range: {scaling_config.equilibrium_range}")
         print(f"  Long range: {scaling_config.long_range}")
 
-        scale_factors = self._generate_scale_factors(scaling_config)
+        # Use API function
+        scale_factors = generate_scale_factors(
+            close_range=scaling_config.close_range,
+            equilibrium_range=scaling_config.equilibrium_range,
+            long_range=scaling_config.long_range,
+        )
         print(f"  Total scale factors: {len(scale_factors)}")
 
         # Filter systems if requested
@@ -90,7 +112,7 @@ Outputs:
             print(f"Processing system: {system.name}")
             print(f"{'=' * 80}")
 
-            # Load system state
+            # Load system state (topology/forcefield only in new format)
             if args.system_file:
                 system_file = Path(args.system_file)
             else:
@@ -98,11 +120,13 @@ Outputs:
                     args.output_dir, f"system_{system.name}.pkl"
                 )
 
-            # Load system state from pickle
             system_state = load_pickle(system_file)
             tensor_system = system_state["tensor_system"]
-            coords = system_state["coords"]
-            box_vectors = system_state["box_vectors"]
+
+            # Load coordinates from appropriate source
+            coords, box_vectors = self._load_coordinates(
+                args, system, system_state, scaling_config.n_frames
+            )
 
             # Convert to numpy arrays in angstroms (if they're OpenMM quantities)
             if hasattr(coords, "value_in_unit"):
@@ -118,29 +142,19 @@ Outputs:
             # Determine number of input frames
             n_input_frames = coords_np.shape[0] if coords_np.ndim == 3 else 1
 
-            # Generate scaled configurations
+            # Generate scaled configurations using API function
             print("Creating scaled configurations...")
             print(f"  Input frames: {n_input_frames}")
             print(f"  Scale factors: {len(scale_factors)}")
-            print(
-                f"  Total configurations to generate: {n_input_frames * len(scale_factors)}"
-            )
-            coords_scaled, box_vectors_scaled = self._create_scaled_dataset(
+            print(f"  Total configurations: {n_input_frames * len(scale_factors)}")
+            scaling_result = create_scaled_configurations(
                 tensor_system, coords_np, box_vectors_np, scale_factors
             )
+            coords_scaled = scaling_result.coords
+            box_vectors_scaled = scaling_result.box_vectors
+            expanded_scale_factors = scaling_result.scale_factors
 
             print(f"  Generated {len(coords_scaled)} scaled configurations")
-
-            # Create expanded scale factors array that matches the number of configurations
-            # When we have N input frames and M scale factors, we generate N×M configurations
-            # We need to repeat each scale factor N times to maintain the correspondence
-            if n_input_frames > 1:
-                expanded_scale_factors = np.repeat(scale_factors, n_input_frames)
-                print(
-                    f"  Expanded scale factors from {len(scale_factors)} to {len(expanded_scale_factors)} to match configurations"
-                )
-            else:
-                expanded_scale_factors = scale_factors
 
             # Save scaled data
             scaled_file = self._output_path(
@@ -149,8 +163,9 @@ Outputs:
             scaled_data = {
                 "coords_scaled": coords_scaled,
                 "box_vectors_scaled": box_vectors_scaled,
-                "scale_factors": expanded_scale_factors,  # Save expanded scale factors
+                "scale_factors": expanded_scale_factors,
                 "tensor_system": tensor_system,
+                "tensor_forcefield": system_state.get("tensor_forcefield"),
                 "components": system_state.get("components", []),
             }
 
@@ -162,7 +177,7 @@ Outputs:
                 "n_configurations": len(coords_scaled),
             }
 
-        # Save scale factors (use unique values for the global file)
+        # Save scale factors
         if args.system_name:
             scale_factors_file = self._output_path(
                 args.output_dir, f"scale_factors_{args.system_name}.npy"
@@ -170,7 +185,6 @@ Outputs:
         else:
             scale_factors_file = self._output_path(args.output_dir, "scale_factors.npy")
 
-        # Save unique scale factors for reference (not expanded)
         np.save(scale_factors_file, scale_factors)
         print(f"\nScale factors saved: {scale_factors_file}")
 
@@ -180,146 +194,108 @@ Outputs:
 
         return {"systems": results, "scale_factors_file": str(scale_factors_file)}
 
-    @staticmethod
-    def _generate_scale_factors(scaling_config):
-        """Generate scale factors for density variation."""
-        close = np.linspace(*scaling_config.close_range)
-        equilibrium = np.linspace(*scaling_config.equilibrium_range)
-        long = np.linspace(*scaling_config.long_range)
-        scale_factors = np.concatenate((close, equilibrium[1:], long[1:]))
-        return scale_factors
+    def _load_coordinates(self, args, system, system_state, n_frames):
+        """Load coordinates from appropriate source.
 
-    @staticmethod
-    def _compute_molecule_coms(coords, n_atoms_per_mol):
-        """Compute center of mass for each molecule."""
-        if coords.ndim == 2:
-            n_atoms = coords.shape[0]
-            n_molecules = n_atoms // n_atoms_per_mol
-            coords_reshaped = coords.reshape(n_molecules, n_atoms_per_mol, 3)
-            coms = coords_reshaped.mean(axis=1)
-        elif coords.ndim == 3:
-            n_frames, n_atoms = coords.shape[:2]
-            n_molecules = n_atoms // n_atoms_per_mol
-            coords_reshaped = coords.reshape(n_frames, n_molecules, n_atoms_per_mol, 3)
-            coms = coords_reshaped.mean(axis=2)
+        Priority:
+        1. --mlp-coords argument
+        2. mlp_coords_{system}.pkl (if exists)
+        3. --trajectory argument
+        4. system.trajectory_path from config
+        5. trajectory_{system}.dcd (default)
+        6. Backward compat: coords in system_state (old format)
+        """
+        # Check for MLP coords file
+        mlp_coords_file = None
+        if args.mlp_coords:
+            mlp_coords_file = Path(args.mlp_coords)
         else:
-            raise ValueError(f"coords must be 2D or 3D, got shape {coords.shape}")
-        return coms
-
-    @staticmethod
-    def _get_box_center(box_vectors):
-        """Compute the center of the simulation box."""
-        if box_vectors.ndim == 2:
-            center = 0.5 * np.diag(box_vectors)
-        elif box_vectors.ndim == 3:
-            center = 0.5 * np.diagonal(box_vectors, axis1=1, axis2=2)
-        else:
-            raise ValueError(
-                f"box_vectors must be 2D or 3D, got shape {box_vectors.shape}"
+            default_mlp = self._output_path(
+                args.output_dir, f"mlp_coords_{system.name}.pkl"
             )
-        return center
+            if default_mlp.exists():
+                mlp_coords_file = default_mlp
+
+        if mlp_coords_file and mlp_coords_file.exists():
+            print(f"Loading MLP relaxed coordinates: {mlp_coords_file}")
+            mlp_data = load_pickle(mlp_coords_file)
+            return mlp_data["coords"], mlp_data["box_vectors"]
+
+        # Check for trajectory file
+        trajectory_path = None
+        if args.trajectory:
+            trajectory_path = Path(args.trajectory)
+        elif system.trajectory_path:
+            trajectory_path = Path(system.trajectory_path)
+        else:
+            default_traj = self._output_path(
+                args.output_dir, f"trajectory_{system.name}.dcd"
+            )
+            if default_traj.exists():
+                trajectory_path = default_traj
+
+        if trajectory_path and trajectory_path.exists():
+            print(f"Loading trajectory: {trajectory_path}")
+            return self._load_last_frames(trajectory_path, n_frames)
+
+        # Backward compatibility: coords in system_state (old format)
+        if "coords" in system_state and "box_vectors" in system_state:
+            print("Using coordinates from system state (backward compat)")
+            return system_state["coords"], system_state["box_vectors"]
+
+        raise FileNotFoundError(
+            f"No coordinate source found for system '{system.name}'. "
+            "Run MDNode or provide --trajectory or --mlp-coords."
+        )
 
     @staticmethod
-    def _scale_molecule_positions(coords, box_vectors, n_atoms_per_mol, scale_factor):
-        """Scale molecular positions rigidly around the box center."""
-        single_frame = coords.ndim == 2
-        if single_frame:
-            coords = np.expand_dims(coords, axis=0)
-            box_vectors = np.expand_dims(box_vectors, axis=0)
+    def _load_last_frames(trajectory_path, n_frames=1):
+        """Load the last N frames from a trajectory file."""
+        coords_list = []
+        box_vectors_list = []
 
-        n_frames, n_atoms = coords.shape[:2]
-        n_molecules = n_atoms // n_atoms_per_mol
-
-        # Compute molecular centers of mass
-        coms = ScalingNode._compute_molecule_coms(coords, n_atoms_per_mol)
-
-        # Get box centers
-        box_centers = ScalingNode._get_box_center(box_vectors)
-
-        # Compute displacement vectors from box center to each COM
-        displacements = coms - box_centers[:, np.newaxis, :]
-
-        # Scale displacements
-        scaled_displacements = displacements * scale_factor
-
-        # Compute new COMs
-        new_coms = box_centers[:, np.newaxis, :] + scaled_displacements
-
-        # Compute translation vector for each molecule
-        translations = new_coms - coms
-
-        # Apply translations to all atoms in each molecule
-        coords_reshaped = coords.reshape(n_frames, n_molecules, n_atoms_per_mol, 3)
-        translations_expanded = translations[:, :, np.newaxis, :]
-
-        # Apply translation
-        scaled_coords = coords_reshaped + translations_expanded
-
-        # Reshape back to original shape
-        scaled_coords = scaled_coords.reshape(n_frames, n_atoms, 3)
-
-        # Scale box vectors
-        scaled_box_vectors = box_vectors * scale_factor
-
-        # Remove batch dimension if input was single frame
-        if single_frame:
-            scaled_coords = np.squeeze(scaled_coords, axis=0)
-            scaled_box_vectors = np.squeeze(scaled_box_vectors, axis=0)
-
-        return scaled_coords, scaled_box_vectors
-
-    @staticmethod
-    def _create_scaled_dataset(tensor_system, coords, box_vectors, scale_factors):
-        """Create a dataset with multiple scaled versions of the input configurations."""
-        all_coords = []
-        all_box_vectors = []
-
-        for scale in scale_factors:
-            scaled_slices = []
-            current_idx = 0
-            final_scaled_box_vecs = None
-
-            for topology, n_copy in zip(
-                tensor_system.topologies, tensor_system.n_copies
+        with open(trajectory_path, "rb") as f:
+            for coord, box_vector, _, kinetic in tqdm(
+                smee.mm._reporters.unpack_frames(f), desc="Loading trajectory"
             ):
-                n_atoms_per_mol = len(topology.atomic_nums)
-                n_atoms_total_species = n_atoms_per_mol * n_copy
+                coords_list.append(coord)
+                box_vectors_list.append(box_vector)
 
-                # Slice coords for this species
-                if coords.ndim == 2:
-                    species_coords = coords[
-                        current_idx : current_idx + n_atoms_total_species
-                    ]
-                else:
-                    species_coords = coords[
-                        :, current_idx : current_idx + n_atoms_total_species, :
-                    ]
+        if not coords_list:
+            raise ValueError(f"No frames found in trajectory: {trajectory_path}")
 
-                # Scale this block of molecules
-                scaled_species_coords, scaled_box_vecs = (
-                    ScalingNode._scale_molecule_positions(
-                        species_coords, box_vectors, n_atoms_per_mol, float(scale)
-                    )
-                )
+        total_frames = len(coords_list)
+        if n_frames > total_frames:
+            raise ValueError(
+                f"Requested {n_frames} frames but trajectory only has "
+                f"{total_frames} frames. Please reduce n_frames in scaling config."
+            )
 
-                scaled_slices.append(scaled_species_coords)
-                current_idx += n_atoms_total_species
+        # Get the last n_frames
+        if n_frames == 1:
+            last_coords = coords_list[-1]
+            last_box_vectors = box_vectors_list[-1]
+            coords_quantity = last_coords.detach().cpu().numpy() * openmm.unit.angstrom
+            box_vectors_quantity = (
+                last_box_vectors.detach().cpu().numpy() * openmm.unit.angstrom
+            )
+        else:
+            selected_coords = coords_list[-n_frames:]
+            selected_box_vectors = box_vectors_list[-n_frames:]
 
-                # Keep the scaled box vectors (they are the same for all species)
-                final_scaled_box_vecs = scaled_box_vecs
+            coords_array = np.stack(
+                [c.detach().cpu().numpy() for c in selected_coords], axis=0
+            )
+            box_vectors_array = np.stack(
+                [b.detach().cpu().numpy() for b in selected_box_vectors], axis=0
+            )
 
-            # Concatenate all scaled species coordinates
-            if coords.ndim == 2:
-                full_scaled_coords = np.concatenate(scaled_slices, axis=0)
-                all_coords.append(full_scaled_coords)
-                all_box_vectors.append(final_scaled_box_vecs)
-            else:
-                # Multiple frames: concatenate species and flatten frames into list
-                full_scaled_coords = np.concatenate(scaled_slices, axis=1)
-                # full_scaled_coords has shape (n_frames, n_atoms, 3)
-                # Unpack each frame into a separate list element
-                for frame_idx in range(full_scaled_coords.shape[0]):
-                    all_coords.append(full_scaled_coords[frame_idx])
-                    all_box_vectors.append(final_scaled_box_vecs[frame_idx])
+            coords_quantity = coords_array * openmm.unit.angstrom
+            box_vectors_quantity = box_vectors_array * openmm.unit.angstrom
 
-        return all_coords, all_box_vectors
+        print(f"  Loaded {n_frames} frame(s) from {total_frames} total frames")
+        return coords_quantity, box_vectors_quantity
+
+    # Note: Scaling functions (generate_scale_factors, compute_molecule_coms,
+    # get_box_center, scale_molecule_positions, create_scaled_configurations)
+    # have been moved to scalej.scaling module for API access.

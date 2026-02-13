@@ -72,12 +72,16 @@ def _add_node_subcommands(subparsers):
     from ..workflow.export_node import ExportNode
     from ..workflow.md_node import MDNode
     from ..workflow.ml_potential_node import MLPotentialNode
+    from ..workflow.mlp_md_node import MLPMDNode
     from ..workflow.scaling_node import ScalingNode
+    from ..workflow.system_setup_node import SystemSetupNode
     from ..workflow.training_node import TrainingNode
 
     # Define all workflow nodes
     nodes = [
+        SystemSetupNode,
         MDNode,
+        MLPMDNode,
         ScalingNode,
         MLPotentialNode,
         DatasetNode,

@@ -7,6 +7,9 @@ from typing import Any
 from openff.toolkit import ForceField
 
 from ..cli.utils import create_configs_from_dict, load_config
+
+# Import API function
+from ..io import export_forcefield_to_offxml
 from ._utils import load_pickle
 from .node import WorkflowNode
 
@@ -94,14 +97,11 @@ Outputs:
             print(f"Loading base force field: {general_config.force_field_name}")
             force_field = ForceField(general_config.force_field_name, load_plugins=True)
 
-        # Export to OpenFF XML format
+        # Export to OpenFF XML format using API function
         print("\nExporting to OpenFF XML format...")
         off_xml_file = self._output_path(args.output_dir, args.output_name)
 
-        updated_forcefield = self._create_off_forcefield_from_tensor(
-            force_field, final_force_field
-        )
-        updated_forcefield.to_file(str(off_xml_file))
+        export_forcefield_to_offxml(force_field, final_force_field, off_xml_file)
 
         print(f"\n{'=' * 80}")
         print(f"Force field exported: {off_xml_file}")
@@ -111,51 +111,5 @@ Outputs:
             "forcefield_file": str(off_xml_file),
         }
 
-    @staticmethod
-    def _create_off_forcefield_from_tensor(forcefield, tensor_ff):
-        """
-        Get an OpenFF ForceField object with updated parameters from a tensor-based force field.
-
-        Notes
-        -----
-        Currently this only works for the vdW parameters, and specifically using the 
-        Double Exponential potential or the Lennard-Jones potential.
-
-        Parameters
-        ----------
-        forcefield : openff.toolkit.typing.engines.smirnoff.ForceField\
-            The OpenFF force field to update.
-        tensor_ff : smee._models.TensorForceField
-            The tensor-based force field containing the new parameters.
-
-        Returns
-        -------
-        openff.toolkit.typing.engines.smirnoff.ForceField
-            The updated OpenFF force field.
-        """
-        import copy
-
-        from openff.units import unit as offunit
-
-        forcefield = copy.deepcopy(forcefield)
-        tag = (
-            "vdW"
-            if forcefield.get_parameter_handler("vdW").parameters
-            else "DoubleExponential"
-        )
-        potential_vdw = tensor_ff.potentials_by_type["vdW"]
-        off_potential_vdw = forcefield.get_parameter_handler(tag)
-        for i in range(potential_vdw.parameters.shape[1]):
-            col = potential_vdw.parameter_cols[i]
-            for j in range(potential_vdw.parameters.shape[0]):
-                smirk_id = potential_vdw.parameter_keys[j].id
-                val = potential_vdw.parameters[j, i]
-                unit = (
-                    offunit.kilocalories_per_mole
-                    if col == "epsilon"
-                    else offunit.angstrom
-                )
-                param = off_potential_vdw.get_parameter({"smirks": smirk_id})[0]
-                setattr(param, col, val.item() * unit)
-
-        return forcefield
+    # Note: _create_off_forcefield_from_tensor has been moved to
+    # scalej.io.export_forcefield_to_offxml for API access.
