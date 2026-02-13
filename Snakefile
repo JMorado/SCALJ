@@ -1,15 +1,13 @@
 """
 SCALeJ Snakemake Workflow
 
-This version enables true parallel execution using --system-name flags.
 
 Usage:
-    # Run with multiple cores to parallelize data generation for multiple systems
+    # Full workflow
     snakemake -s Snakefile --cores 4 --configfile examples/config.yaml
 """
 
 import yaml
-from pathlib import Path
 
 # Default config file - use workflow.configfiles if provided via --configfile
 if workflow.configfiles:
@@ -27,6 +25,10 @@ OUTPUT_DIR = config_data.get("general", {}).get("output_dir", "output")
 # Get system names from config
 SYSTEMS = [system["name"] for system in config_data.get("general", {}).get("systems", [])]
 
+# Check if MLP relaxation is enabled
+USE_MLP_RELAXATION = config_data.get("simulation", {}).get("n_mlp_steps", 0) > 0
+
+
 # Defines the final targets
 rule all:
     input:
@@ -38,12 +40,39 @@ rule all:
         f"{OUTPUT_DIR}/benchmark_results.txt"
 
 
-# Run MD simulation for a single system
-rule md_system:
+# ============================================================================
+# Step 1: System Setup - Create system topology/forcefield
+# ============================================================================
+rule system_setup:
     input:
         config=CONFIG_FILE
     output:
-        system=f"{OUTPUT_DIR}/system_{{system}}.pkl",
+        system=f"{OUTPUT_DIR}/system_{{system}}.pkl"
+    params:
+        output_dir=OUTPUT_DIR,
+        system_name="{system}"
+    log:
+        f"{OUTPUT_DIR}/logs/system_setup_{{system}}.log"
+    threads: 1
+    shell:
+        """
+        mkdir -p {params.output_dir}/logs
+        scalej system_setup \
+            --config {input.config} \
+            --output-dir {params.output_dir} \
+            --system-name {params.system_name} \
+            --log-file {log} 2>&1 | tee -a {log}
+        """
+
+
+# ============================================================================
+# Step 2: MD Simulation - Run classical MD 
+# ============================================================================
+rule md_system:
+    input:
+        config=CONFIG_FILE,
+        system=f"{OUTPUT_DIR}/system_{{system}}.pkl"
+    output:
         trajectory=f"{OUTPUT_DIR}/trajectory_{{system}}.dcd"
     params:
         output_dir=OUTPUT_DIR,
@@ -62,11 +91,68 @@ rule md_system:
         """
 
 
-# Generate scaled configurations for a single system
-rule scaling_system:
+# ============================================================================
+# Step 3: MLP MD Relaxation 
+# ============================================================================
+rule mlp_md_system:
     input:
         config=CONFIG_FILE,
-        system=f"{OUTPUT_DIR}/system_{{system}}.pkl"
+        system=f"{OUTPUT_DIR}/system_{{system}}.pkl",
+        trajectory=lambda wildcards: (
+            config_data["general"]["systems"][
+                [s["name"] for s in config_data["general"]["systems"]].index(wildcards.system)
+            ].get("trajectory_path")
+            or f"{OUTPUT_DIR}/trajectory_{wildcards.system}.dcd"
+        )
+    output:
+        mlp_coords=f"{OUTPUT_DIR}/mlp_coords_{{system}}.pkl"
+    params:
+        output_dir=OUTPUT_DIR,
+        system_name="{system}"
+    log:
+        f"{OUTPUT_DIR}/logs/mlp_md_{{system}}.log"
+    threads: 1
+    shell:
+        """
+        mkdir -p {params.output_dir}/logs
+        scalej mlp_md \
+            --config {input.config} \
+            --output-dir {params.output_dir} \
+            --system-name {params.system_name} \
+            --log-file {log} 2>&1 | tee -a {log}
+        """
+
+
+# ============================================================================
+# Step 4: Scaling - Generate scaled configurations
+# ============================================================================
+def get_scaling_inputs(wildcards):
+    """Get appropriate input files for scaling based on config."""
+    inputs = {
+        "config": CONFIG_FILE,
+        "system": f"{OUTPUT_DIR}/system_{wildcards.system}.pkl",
+    }
+    # Check if system has existing trajectory
+    system_config = None
+    for s in config_data.get("general", {}).get("systems", []):
+        if s["name"] == wildcards.system:
+            system_config = s
+            break
+
+    if USE_MLP_RELAXATION:
+        inputs["mlp_coords"] = f"{OUTPUT_DIR}/mlp_coords_{wildcards.system}.pkl"
+    elif system_config and system_config.get("trajectory_path"):
+        # Use existing trajectory from config (no dependency needed)
+        pass
+    else:
+        inputs["trajectory"] = f"{OUTPUT_DIR}/trajectory_{wildcards.system}.dcd"
+
+    return inputs
+
+
+rule scaling_system:
+    input:
+        unpack(get_scaling_inputs)
     output:
         scaled=f"{OUTPUT_DIR}/scaled_{{system}}.pkl",
         factors=f"{OUTPUT_DIR}/scale_factors_{{system}}.npy"
@@ -104,7 +190,9 @@ rule merge_scale_factors:
         np.save(output[0], combined)
 
 
-# Compute ML potential for a single system
+# ============================================================================
+# Step 5: ML Potential - Compute MLP energies/forces
+# ============================================================================
 rule ml_potential_system:
     input:
         config=CONFIG_FILE,
@@ -117,7 +205,7 @@ rule ml_potential_system:
         system_name="{system}"
     log:
         f"{OUTPUT_DIR}/logs/ml_potential_{{system}}.log"
-    threads: 1  # Each ML potential computation uses 1 thread
+    threads: 1
     shell:
         """
         mkdir -p {params.output_dir}/logs
@@ -129,7 +217,9 @@ rule ml_potential_system:
         """
 
 
-# Combine datasets from all systems
+# ============================================================================
+# Step 6: Dataset - Combine datasets from all systems
+# ============================================================================
 rule dataset:
     input:
         config=CONFIG_FILE,
@@ -153,7 +243,9 @@ rule dataset:
         """
 
 
-# Train LJ parameters
+# ============================================================================
+# Step 7: Training - Train LJ parameters
+# ============================================================================
 rule training:
     input:
         config=CONFIG_FILE,
@@ -178,7 +270,9 @@ rule training:
         """
 
 
-# Evaluate initial parameters (before training)
+# ============================================================================
+# Step 8: Evaluation - Evaluate initial parameters (before training)
+# ============================================================================
 rule evaluation_initial:
     input:
         config=CONFIG_FILE,
@@ -236,7 +330,9 @@ rule evaluation_final:
         """
 
 
-# Run benchmark for all systems
+# ============================================================================
+# Step 9: Benchmark - Run benchmark for all systems
+# ============================================================================
 rule benchmark:
     input:
         config=CONFIG_FILE,
@@ -259,7 +355,10 @@ rule benchmark:
             --log-file {log} 2>&1 | tee -a {log}
         """
 
-# Rule: Export force field
+
+# ============================================================================
+# Step 10: Export - Export optimized force field
+# ============================================================================
 rule export:
     input:
         config=CONFIG_FILE,
@@ -311,6 +410,6 @@ rule clean:
 rule dag:
     shell:
         """
-        snakemake -s Snakefile.parallel --dag --configfile {CONFIG_FILE} | dot -Tpng > workflow_dag_parallel.png
-        echo "Workflow DAG saved to workflow_dag_parallel.png"
+        snakemake -s Snakefile --dag --configfile {CONFIG_FILE} | dot -Tpng > workflow_dag.png
+        echo "Workflow DAG saved to workflow_dag.png"
         """
