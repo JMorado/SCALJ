@@ -164,11 +164,9 @@ Outputs:
 
     def _get_trajectory_path(self, args: argparse.Namespace, system) -> str:
         """Determine trajectory path from args or config."""
-        # Priority 1: Command-line override
         if args.trajectory:
             return args.trajectory
 
-        # Priority 2: Config trajectory_path
         if system.trajectory_path:
             return system.trajectory_path
 

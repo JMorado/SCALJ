@@ -201,7 +201,7 @@ Outputs:
         3. --trajectory argument
         4. system.trajectory_path from config
         5. trajectory_{system}.dcd (default)
-        6. Backward compat: coords in system_state (old format)
+        6. coords in system_state (backward compatibility)
         """
         # Check for MLP coords file
         mlp_coords_file = None
@@ -237,7 +237,7 @@ Outputs:
             frames = load_trajectory_frames(trajectory_path, n_frames=n_frames)
             return frames.coords, frames.box_vectors
 
-        # Backward compatibility: coords in system_state (old format)
+        # Backward compatibility: coords in system_state
         if "coords" in system_state and "box_vectors" in system_state:
             print("Using coordinates from system state (backward compat)")
             return system_state["coords"], system_state["box_vectors"]
@@ -246,7 +246,3 @@ Outputs:
             f"No coordinate source found for system '{system.name}'. "
             "Run MDNode or provide --trajectory or --mlp-coords."
         )
-
-    # Note: Scaling functions (generate_scale_factors, compute_molecule_coms,
-    # get_box_center, scale_molecule_positions, create_scaled_configurations)
-    # have been moved to scalej.scaling module for API access.

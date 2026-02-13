@@ -109,6 +109,3 @@ Outputs:
         return {
             "forcefield_file": str(off_xml_file),
         }
-
-    # Note: _create_off_forcefield_from_tensor has been moved to
-    # scalej.io.export_forcefield_to_offxml for API access.
