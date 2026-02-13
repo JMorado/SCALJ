@@ -33,7 +33,9 @@ After installation, the `scalej` command provides access to all workflow nodes:
 scalej --help
 
 # Available nodes:
+#   system_setup  - Create system topology and force field
 #   md            - Run molecular dynamics simulations
+#   mlp_md        - Run MLP-based MD relaxation (optional)
 #   scaling       - Generate scaled configurations
 #   ml_potential  - Compute ML potential energies and forces
 #   dataset       - Prepare combined datasets
@@ -60,6 +62,7 @@ Run the workflow with `Snakefile`:
 ```bash
 snakemake -s Snakefile --cores 1 --configfile config.yaml
 ```
+
 For faster execution with parallel processing:
 
 ```bash
@@ -67,14 +70,15 @@ For faster execution with parallel processing:
 snakemake -s Snakefile --cores 4 --configfile config.yaml
 ```
 
-
 This executes all workflow steps:
-1. MD simulations (parallelized per system when using multiple cores)
-2. Configuration scaling (parallelized per system)
-3. Scale factor merging across all systems
-4. ML potential energy/force calculations (parallelized per system)
-5. Dataset preparation and combination
-6. Parameter training on combined dataset
-7. Evaluation of initial and optimized parameters
-8. Force field export
-9. Benchmarking (parallelized per system)
+1. System setup (parallelized per system)
+2. MD simulations (parallelized per system)
+3. MLP MD relaxation (optional, parallelized per system)
+4. Configuration scaling (parallelized per system)
+5. Scale factor merging across all systems
+6. ML potential energy/force calculations (parallelized per system)
+7. Dataset preparation and combination
+8. Parameter training on combined dataset
+9. Evaluation of initial and optimized parameters
+10. Force field export
+11. Benchmarking (parallelized per system)
