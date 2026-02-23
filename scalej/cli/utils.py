@@ -53,6 +53,7 @@ def create_configs_from_dict(config_dict: dict) -> tuple:
     scaling_config = cfg.ScalingConfig(**config_dict.get("scaling", {}))
     training_config = cfg.TrainingConfig(**config_dict.get("training", {}))
     parameter_config = cfg.ParameterConfig(**config_dict.get("parameters", {}))
+    attribute_config = cfg.AttributeConfig(**config_dict.get("attributes", {}))
 
     return (
         general_config,
@@ -60,6 +61,7 @@ def create_configs_from_dict(config_dict: dict) -> tuple:
         scaling_config,
         training_config,
         parameter_config,
+        attribute_config,
     )
 
 
@@ -130,6 +132,12 @@ def generate_config(args):
         limits={"epsilon": [None, None], "r_min": [0.0, None]},
     )
 
+    example_attributes = cfg.AttributeConfig(
+        cols=["alpha", "beta"],
+        scales={"alpha": 10.0, "beta": 1.0},
+        limits={"alpha": [None, None], "beta": [None, None]},
+    )
+
     # Convert to dictionary, excluding runtime-populated fields
     config_dict = {
         "general": example_general.model_dump(
@@ -145,6 +153,7 @@ def generate_config(args):
         "scaling": example_scaling.model_dump(mode="python"),
         "training": example_training.model_dump(mode="python"),
         "parameters": example_parameters.model_dump(mode="python"),
+        "attributes": example_attributes.model_dump(mode="python"),
     }
 
     # Convert tuples to lists recursively to avoid !!python/tuple tags in YAML

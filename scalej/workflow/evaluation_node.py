@@ -90,7 +90,7 @@ Outputs:
 
         # Load configuration
         config_dict = load_config(args.config)
-        _, _, _, training_config, _ = create_configs_from_dict(config_dict)
+        _, _, _, training_config, *_= create_configs_from_dict(config_dict)
 
         self._ensure_output_dir(args.output_dir)
 

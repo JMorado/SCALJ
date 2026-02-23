@@ -13,14 +13,17 @@ from tqdm import tqdm
 from .models import LossResult, PredictionResult, TrainingResult
 
 if TYPE_CHECKING:
-    from .config import ParameterConfig, TrainingConfig
+    from .config import ParameterConfig, TrainingConfig, AttributeConfig
 
 
 def create_trainable(
     force_field: smee.TensorForceField,
-    cols: list[str] = ["epsilon", "sigma"],
-    scales: dict[str, float] | None = None,
-    limits: dict[str, tuple[float, float]] | None = None,
+    parameters_cols: list[str] = ["epsilon", "sigma"],
+    parameters_scales: dict[str, float] | None = None,
+    parameters_limits: dict[str, tuple[float, float]] | None = None,
+    attributes_cols: list[str] = [],
+    attributes_scales: dict[str, float] | None = None,
+    attributes_limits: dict[str, tuple[float, float]] | None = None,
     device: str = "cpu",
 ) -> descent.train.Trainable:
     """Create a trainable object for parameter optimization.
@@ -35,6 +38,13 @@ def create_trainable(
         Scaling factors for each parameter type.
     limits : dict[str, tuple[float, float]], optional
         Min/max limits for each parameter type.
+    attributes_cols : list[str]
+        Attribute columns to optimize (e.g., ["charge"]).
+    attributes_scales : dict[str, float], optional
+        Scaling factors for each attribute type.
+    attributes_limits : dict[str, tuple[float, float]], optional
+        Min/max limits for each attribute type.
+
     device : str
         Device to use for training.
 
@@ -47,16 +57,22 @@ def create_trainable(
     --------
     >>> trainable = create_trainable(force_field, cols=["epsilon", "sigma"])
     """
-    if scales is None:
-        scales = {}
-    if limits is None:
-        limits = {}
+    parameters_scales = parameters_scales or {}
+    parameters_limits = parameters_limits or {}
+    attributes_scales = attributes_scales or {}
+    attributes_limits = attributes_limits or {}
 
     # Create trainable parameter config for vdW parameters
     vdw_parameter_config = descent.train.ParameterConfig(
-        cols=cols,
-        scales=scales,
-        limits=limits,
+        cols=parameters_cols,
+        scales=parameters_scales,
+        limits=parameters_limits,
+    )
+
+    vdw_attribute_config = descent.train.AttributeConfig(
+        cols=attributes_cols,
+        scales=attributes_scales,
+        limits=attributes_limits,
     )
 
     # Ensure vdW parameters require gradients
@@ -67,7 +83,7 @@ def create_trainable(
     trainable = descent.train.Trainable(
         force_field=force_field.to(device),
         parameters={"vdW": vdw_parameter_config},
-        attributes={},
+        attributes={"vdW": vdw_attribute_config},
     )
 
     return trainable

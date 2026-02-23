@@ -67,7 +67,7 @@ Outputs:
 
         # Load configuration
         config_dict = load_config(args.config)
-        _, _, _, training_config, parameter_config = create_configs_from_dict(
+        _, _, _, training_config, parameter_config, attribute_config = create_configs_from_dict(
             config_dict
         )
 
@@ -86,6 +86,7 @@ Outputs:
         print(f"  Epochs: {training_config.n_epochs}")
         print(f"  Device: {training_config.device}")
         print(f"  Parameters: {parameter_config.cols}")
+        print(f"  Attributes: {attribute_config.cols}")
         print(f"  Energy weight: {training_config.energy_weight}")
         print(f"  Force weight: {training_config.force_weight}")
 
@@ -108,9 +109,12 @@ Outputs:
 
         composite_trainable = training.create_trainable(
             composite_tensor_forcefield,
-            cols=parameter_config.cols,
-            scales=parameter_config.scales,
-            limits=parameter_config.limits,
+            parameters_cols=parameter_config.cols,
+            parameters_scales=parameter_config.scales,
+            parameters_limits=parameter_config.limits,
+            attributes_cols=attribute_config.cols,
+            attributes_scales=attribute_config.scales,
+            attributes_limits=attribute_config.limits,
             device=training_config.device,
         )
 
@@ -128,6 +132,7 @@ Outputs:
             "initial_force_field": composite_tensor_forcefield,
             "training_config": training_config,
             "parameter_config": parameter_config,
+            "attribute_config": attribute_config,
             "composite_trainable": composite_trainable,
         }
 
@@ -186,6 +191,7 @@ Outputs:
             "force_losses": training_result.force_losses,
             "training_config": training_config,
             "parameter_config": parameter_config,
+            "attribute_config": attribute_config,
             "composite_trainable": composite_trainable,
         }
 

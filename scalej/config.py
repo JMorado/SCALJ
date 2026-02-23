@@ -305,3 +305,28 @@ class ParameterConfig(BaseModel):
         default_factory=lambda: {"epsilon": (None, None), "r_min": (0.0, None)},
         description="(min, max) limits for each parameter.",
     )
+
+
+class AttributeConfig(BaseModel):
+    """
+    Configuration for trainable attributes.
+
+    Attributes
+    ----------
+    cols : list of str
+        Attribute column names to train.
+    scales : dict of {str: float}
+        Scaling factors for each attribute.
+    limits : dict of {str: tuple of (float or None, float or None)}
+        (min, max) limits for each attribute.
+    """
+
+    cols: list[str] = pydantic.Field(
+        default_factory=list, description="Attribute column names to train."
+    )
+    scales: dict[str, float] = pydantic.Field(
+        default_factory=dict, description="Scaling factors for each attribute."
+    )
+    limits: dict[str, tuple[float | None, float | None]] = pydantic.Field(
+        default_factory=dict, description="(min, max) limits for each attribute."
+    )

@@ -59,3 +59,17 @@ parameters:
     r_min:
     - 0.0
     - null
+attributes:
+  cols:
+  - alpha
+  - beta
+  scales:
+    alpha: 1.0
+    beta: 1.0
+  limits:
+    alpha:
+    - null
+    - null
+    beta:
+    - null
+    - null

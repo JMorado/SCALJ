@@ -65,7 +65,7 @@ Outputs:
 
         # Load configuration
         config_dict = load_config(args.config)
-        general_config, simulation_config, scaling_config, _, _ = (
+        general_config, simulation_config, scaling_config, *_ = (
             create_configs_from_dict(config_dict)
         )
 

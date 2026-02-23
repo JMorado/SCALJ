@@ -57,9 +57,7 @@ Outputs:
         (
             general_config,
             simulation_config,
-            _,
-            _,
-            _,
+            *_
         ) = create_configs_from_dict(config_dict)
 
         self._ensure_output_dir(args.output_dir)
