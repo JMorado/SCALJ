@@ -13,7 +13,7 @@ from tqdm import tqdm
 from .models import LossResult, PredictionResult, TrainingResult
 
 if TYPE_CHECKING:
-    from .config import ParameterConfig, TrainingConfig, AttributeConfig
+    from .config import AttributeConfig, ParameterConfig, TrainingConfig
 
 
 def create_trainable(
@@ -32,11 +32,11 @@ def create_trainable(
     ----------
     force_field : smee.TensorForceField
         The force field with parameters to train.
-    cols : list[str]
+    parameters_cols : list[str]
         Parameter columns to optimize (e.g., ["epsilon", "sigma"]).
-    scales : dict[str, float], optional
+    parameters_scales : dict[str, float], optional
         Scaling factors for each parameter type.
-    limits : dict[str, tuple[float, float]], optional
+    parameters_limits : dict[str, tuple[float, float]], optional
         Min/max limits for each parameter type.
     attributes_cols : list[str]
         Attribute columns to optimize (e.g., ["charge"]).
@@ -44,7 +44,6 @@ def create_trainable(
         Scaling factors for each attribute type.
     attributes_limits : dict[str, tuple[float, float]], optional
         Min/max limits for each attribute type.
-
     device : str
         Device to use for training.
 
@@ -55,7 +54,7 @@ def create_trainable(
 
     Examples
     --------
-    >>> trainable = create_trainable(force_field, cols=["epsilon", "sigma"])
+    >>> trainable = create_trainable(force_field, parameters_cols=["epsilon", "sigma"])
     """
     parameters_scales = parameters_scales or {}
     parameters_limits = parameters_limits or {}
@@ -100,7 +99,8 @@ def predict_energies_forces(
     weighting_temperature: float = 298.15,
     device: str = "cpu",
 ) -> PredictionResult:
-    """Predict energies and forces using the force field.
+    """
+    Predict energies and forces using the force field.
 
     Computes classical force field energies and forces via automatic
     differentiation, with optional filtering and weighting.
@@ -156,41 +156,35 @@ def predict_energies_forces(
         coords_flat = smee.utils.tensor_like(
             entry["coords"], force_field.potentials[0].parameters
         )
-
-        coords = (
-            (coords_flat.reshape(len(energy_ref), -1, 3))
-            .to(device)
-            .requires_grad_(True)
-        )
+        coords_raw = coords_flat.reshape(len(energy_ref), -1, 3).to(device)
 
         box_vectors_flat = smee.utils.tensor_like(
             entry["box_vectors"], force_field.potentials[0].parameters
         )
         box_vectors = (
-            (box_vectors_flat.reshape(len(energy_ref), 3, 3))
-            .to(device)
-            .detach()
-            .requires_grad_(False)
+            box_vectors_flat.reshape(len(energy_ref), 3, 3).to(device).detach()
         )
 
         system = tensor_systems[mixture_id].to(device)
 
-        energy_pred = torch.zeros_like(energy_ref)
-        for i, (coord, box_vector) in tqdm(
-            enumerate(zip(coords, box_vectors)),
-            total=len(coords),
+        energy_pred_list = []
+        forces_pred_list = []
+        for coord_raw, box_vector in tqdm(
+            zip(coords_raw, box_vectors),
+            total=len(coords_raw),
             desc="Predicting energies/forces",
             leave=False,
         ):
-            energy_pred[i] = smee.compute_energy(system, force_field, coord, box_vector)
+            coord = coord_raw.detach().requires_grad_(True)
+            e = smee.compute_energy(system, force_field, coord, box_vector)
+            f = -torch.autograd.grad(
+                e, coord, create_graph=True, retain_graph=True, allow_unused=False
+            )[0]
+            energy_pred_list.append(e)
+            forces_pred_list.append(f)
 
-        forces_pred = -torch.autograd.grad(
-            energy_pred.sum(),
-            coords,
-            create_graph=True,
-            retain_graph=True,
-            allow_unused=False,
-        )[0]
+        energy_pred = torch.stack(energy_pred_list)
+        forces_pred = torch.stack(forces_pred_list)
 
         # Normalize energies by the number of molecules
         n_mols = sum(system.n_copies)
@@ -233,7 +227,6 @@ def predict_energies_forces(
 
         energy_ref_masked = energy_ref[mask_idx]
         energy_pred_masked = energy_pred[mask_idx]
-
         forces_ref_masked = forces_ref[mask_idx]
         forces_pred_masked = forces_pred[mask_idx]
         weights_masked = weights[mask_idx]
@@ -243,7 +236,6 @@ def predict_energies_forces(
         weights_forces_masked = weights_masked.repeat_interleave(n_atoms)
 
         scale_energy, scale_forces = 1.0, 1.0
-
         if normalize:
             n_confs = len(mask_idx)
             if n_confs > 0:
@@ -252,42 +244,26 @@ def predict_energies_forces(
 
         energy_ref_all.append(scale_energy * (energy_ref_masked - energy_ref_0))
         forces_ref_all.append(scale_forces * forces_ref_masked.reshape(-1, 3))
-
         energy_pred_all.append(scale_energy * (energy_pred_masked - energy_pred_0))
         forces_pred_all.append(scale_forces * forces_pred_masked.reshape(-1, 3))
-
         weights_all.append(weights_masked)
         weights_forces_all.append(weights_forces_masked)
-
         all_mask_idxs.append(mask_idx)
 
     if not energy_pred_all:
         raise ValueError("No valid conformers found after filtering")
 
     energy_pred_all = torch.cat(energy_pred_all)
+    energy_ref_all = torch.cat(energy_ref_all).to(energy_pred_all)
+
     forces_pred_all = torch.cat(forces_pred_all)
+    forces_ref_all = torch.cat(forces_ref_all).to(forces_pred_all)
 
-    energy_ref_all = torch.cat(energy_ref_all)
-    energy_ref_all = smee.utils.tensor_like(energy_ref_all, energy_pred_all)
+    weights_all = torch.cat(weights_all).to(energy_pred_all)
+    weights_all = weights_all / weights_all.sum().clamp(min=1e-16)
 
-    forces_ref_all = torch.cat(forces_ref_all)
-    forces_ref_all = smee.utils.tensor_like(forces_ref_all, forces_pred_all)
-
-    weights_all = torch.cat(weights_all)
-    weights_all = smee.utils.tensor_like(weights_all, energy_pred_all)
-
-    weights_forces_all = torch.cat(weights_forces_all)
-    weights_forces_all = weights_forces_all.unsqueeze(1)
-    weights_forces_all = smee.utils.tensor_like(weights_forces_all, forces_pred_all)
-
-    # Normalize weights
-    weights_energy_sum = weights_all.sum()
-    if weights_energy_sum > 0:
-        weights_all = weights_all / weights_energy_sum
-
-    weights_forces_sum = weights_forces_all.sum()
-    if weights_forces_sum > 0:
-        weights_forces_all = weights_forces_all / weights_forces_sum
+    weights_forces_all = torch.cat(weights_forces_all).unsqueeze(1).to(forces_pred_all)
+    weights_forces_all = weights_forces_all / weights_forces_all.sum().clamp(min=1e-16)
 
     return PredictionResult(
         energy_ref=energy_ref_all,
@@ -310,36 +286,27 @@ def compute_loss(
     energy_weight: float = 1.0,
     force_weight: float = 1.0,
 ) -> LossResult:
-    """Compute weighted loss for energies and forces.
+    """Compute weighted MSE loss for energies and forces.
 
     Parameters
     ----------
-    energy_ref : torch.Tensor
-        Reference energies.
-    energy_pred : torch.Tensor
-        Predicted energies.
-    forces_ref : torch.Tensor
-        Reference forces.
-    forces_pred : torch.Tensor
-        Predicted forces.
+    energy_ref, energy_pred : torch.Tensor
+        Reference and predicted per-molecule energies, shape ``[N]``.
+    forces_ref, forces_pred : torch.Tensor
+        Reference and predicted forces, shape ``[N, n_atoms, 3]``.
     weights_energy : torch.Tensor, optional
-        Weights for each energy point.
+        Per-conformer weights for energy loss.  Defaults to uniform.
     weights_forces : torch.Tensor, optional
-        Weights for each force component.
+        Per-element weights for force loss.  Defaults to uniform.
     energy_weight : float
-        Weight for energy loss term.
+        Global scale for the energy loss term.
     force_weight : float
-        Weight for force loss term.
+        Global scale for the force loss term.
 
     Returns
     -------
     LossResult
-        Result containing total, energy, and force losses.
-
-    Examples
-    --------
-    >>> loss = compute_loss(e_ref, e_pred, f_ref, f_pred)
-    >>> loss.total_loss.backward()
+        ``total_loss``, ``energy_loss``, and ``force_loss``.
     """
     if weights_energy is None:
         weights_energy = torch.ones_like(energy_ref)
@@ -364,6 +331,221 @@ def compute_loss(
     )
 
 
+def _train_on_entry(
+    entry: dict,
+    params: torch.Tensor,
+    trainable: "descent.train.Trainable",
+    tensor_systems: dict[str, smee.TensorSystem],
+    device: str,
+    reference: str,
+    normalize: bool,
+    energy_cutoff: float | None,
+    weighting_method: str,
+    weighting_temperature: float,
+    energy_weight: float,
+    force_weight: float,
+    frame_batch_size: int = 8,
+) -> tuple[float, float]:
+    """
+    Train on one dataset entry.
+
+    Notes
+    -----
+    This uses mini-batched for the forward and backward passes.
+    Configurations are processes in ``frame_batch_size``.
+
+    Parameters
+    ----------
+    entry : dict
+        Dataset entry.
+    params : torch.Tensor
+        Parameters of the force field.
+    trainable : descent.train.Trainable
+        Trainable object.
+    tensor_systems : dict[str, smee.TensorSystem]
+        Tensor systems.
+    device : str
+        Device to use.
+    reference : str
+        Reference method.
+    normalize : bool
+        Normalize energies and forces.
+    energy_cutoff : float | None
+        Energy cutoff.
+    weighting_method : str
+        Weighting method.
+    weighting_temperature : float
+        Weighting temperature.
+    energy_weight : float
+        Energy weight.
+    force_weight : float
+        Force weight.
+    frame_batch_size : int
+        Frame batch size.
+
+    Returns
+    -------
+    tuple[float, float]
+        Energy and force loss.
+    """
+    mixture_id = entry["mixture_id"]
+    energy_ref_raw = entry["energy"].to(device)
+    forces_ref_raw = entry["forces"].reshape(len(energy_ref_raw), -1, 3).to(device)
+
+    _dtype = params.dtype
+    coords_raw = (
+        torch.tensor(entry["coords"], dtype=_dtype)
+        .reshape(len(energy_ref_raw), -1, 3)
+        .to(device)
+    )
+    box_vectors = (
+        torch.tensor(entry["box_vectors"], dtype=_dtype)
+        .reshape(len(energy_ref_raw), 3, 3)
+        .to(device)
+        .detach()
+    )
+
+    system = tensor_systems[mixture_id].to(device)
+    n_mols = sum(system.n_copies)
+    n_atoms = forces_ref_raw.shape[1]
+    n_frames = len(energy_ref_raw)
+
+    energy_ref_n = (energy_ref_raw / n_mols).detach()
+
+
+    # Pre-pass to compute reference offsets, Boltzmann weights, normalisers.
+    needs_model = reference.lower() in ("mean", "min")
+    with torch.no_grad():
+        if needs_model:
+            ff_ng = trainable.to_force_field(params.detach().abs()).to(device)
+            energy_pred_ng = (
+                torch.stack(
+                    [
+                        smee.compute_energy(system, ff_ng, c.detach(), b)
+                        for c, b in zip(coords_raw, box_vectors)
+                    ]
+                )
+                / n_mols
+            )
+            del ff_ng
+        else:
+            energy_pred_ng = None
+
+        if reference.lower() == "mean":
+            e_ref_0 = energy_ref_n.mean().item()
+            e_pred_0 = energy_pred_ng.mean().item()
+        elif reference.lower() == "min":
+            mi = energy_ref_n.argmin().item()
+            e_ref_0 = energy_ref_n[mi].item()
+            e_pred_0 = energy_pred_ng[mi].item()
+        else:
+            e_ref_0, e_pred_0 = 0.0, 0.0
+
+        if energy_cutoff is not None:
+            mask = (energy_ref_n - energy_ref_n.min()) <= energy_cutoff
+        else:
+            mask = torch.ones(n_frames, dtype=torch.bool, device=device)
+        valid_idx = torch.where(mask)[0]
+        n_valid = len(valid_idx)
+
+        if n_valid == 0:
+            return 0.0, 0.0
+
+        if weighting_method == "boltzmann":
+            kBT = (
+                openmm.unit.AVOGADRO_CONSTANT_NA
+                * openmm.unit.BOLTZMANN_CONSTANT_kB
+                * weighting_temperature
+            ).value_in_unit(openmm.unit.kilocalories_per_mole)
+            e_rel = energy_ref_n[valid_idx] - energy_ref_n[valid_idx].min()
+            w = torch.exp(-e_rel / kBT)
+        else:
+            w = torch.ones(n_valid, device=device)
+        w = w / w.sum()
+
+        energy_ref_shifted = energy_ref_n[valid_idx] - e_ref_0
+        forces_ref_valid = forces_ref_raw[valid_idx]
+
+        var_e = float(energy_ref_shifted.var().clamp(min=1e-16))
+        var_f = float(forces_ref_valid.var().clamp(min=1e-16))
+
+        inv_n = 1.0 / n_valid if normalize else 1.0
+        inv_fn = 1.0 / (n_valid * n_atoms * 3) if normalize else 1.0
+
+
+    # Mini-batch grad pass
+    total_e_loss = 0.0
+    total_f_loss = 0.0
+    n_batches = (n_valid + frame_batch_size - 1) // frame_batch_size
+    for batch_num in tqdm(
+        range(n_batches),
+        desc=f"  batches [{mixture_id}]",
+        leave=False,
+    ):
+        # Slice tensors
+        start = batch_num * frame_batch_size
+        end = min(start + frame_batch_size, n_valid)
+        batch_frame_ids = valid_idx[start:end]
+        w_b = w[start:end].to(dtype=params.dtype)
+
+        # Get force field for this batch
+        ff = trainable.to_force_field(params.abs()).to(device)
+
+        # Get coordinates and boxes for this batch
+        coords_b = [
+            coords_raw[fi].detach().requires_grad_(True)
+            for fi in batch_frame_ids.tolist()
+        ]
+        boxes_b = [box_vectors[fi] for fi in batch_frame_ids.tolist()]
+
+        e_batch = torch.stack(
+            [
+                smee.compute_energy(system, ff, c, b) / n_mols
+                for c, b in zip(coords_b, boxes_b)
+            ]
+        )
+
+        forces_tuple = torch.autograd.grad(
+            e_batch.sum(),
+            inputs=coords_b,
+            create_graph=True,
+            retain_graph=True,
+            allow_unused=False,
+        )
+        f_batch = torch.stack([-f for f in forces_tuple])
+
+        e_ref_b = energy_ref_n[batch_frame_ids] - e_ref_0
+        f_ref_b = forces_ref_raw[batch_frame_ids]
+
+        diff_e = e_batch - e_pred_0 - e_ref_b
+        diff_f = f_batch - f_ref_b
+
+        batch_e = energy_weight * (w_b * diff_e**2).sum() * inv_n / var_e
+        batch_f = force_weight * (w_b[:, None, None] * diff_f**2).sum() * inv_fn / var_f
+        batch_loss = batch_e + batch_f
+        total_e_loss += batch_e.detach().item()
+        total_f_loss += batch_f.detach().item()
+        batch_loss.backward(inputs=[params])
+
+        del (
+            ff,
+            coords_b,
+            e_batch,
+            forces_tuple,
+            f_batch,
+            e_ref_b,
+            f_ref_b,
+            w_b,
+            diff_e,
+            diff_f,
+            batch_e,
+            batch_f,
+            batch_loss,
+        )
+
+    return total_e_loss, total_f_loss
+
+
 def train_parameters(
     trainable: descent.train.Trainable,
     dataset: datasets.Dataset,
@@ -379,12 +561,10 @@ def train_parameters(
     weighting_temperature: float = 298.15,
     device: str = "cpu",
     initial_perturbation: float = 0.2,
+    frame_batch_size: int = 8,
     verbose: bool = True,
 ) -> TrainingResult:
     """Train force field parameters to match reference data.
-
-    Uses gradient-based optimization to fit LJ parameters (epsilon, sigma)
-    to reproduce reference energies and forces from an ML potential.
 
     Parameters
     ----------
@@ -399,49 +579,37 @@ def train_parameters(
     learning_rate : float
         Learning rate for Adam optimizer.
     energy_weight : float
-        Weight for energy loss term.
+        Weight for energy loss term (λ_E).
     force_weight : float
-        Weight for force loss term.
+        Weight for force loss term (λ_F).
     reference : Literal["mean", "min", "none"]
-        Reference energy mode.
+        Reference energy subtraction mode.
     normalize : bool
-        Whether to normalize losses.
+        Whether to normalise losses by variance.
     energy_cutoff : float, optional
-        Energy cutoff for filtering.
+        kcal/mol above minimum; frames above are excluded.
     weighting_method : Literal["uniform", "boltzmann"]
-        Conformer weighting method.
+        Per-conformer weighting scheme.
     weighting_temperature : float
-        Temperature for Boltzmann weighting.
+        Temperature in K for Boltzmann weighting.
     device : str
         Device for computations.
     initial_perturbation : float
-        Magnitude of initial parameter perturbation.
+        Uniform noise magnitude applied to the initial parameters.
+    frame_batch_size : int
+        Conformers processed per backward pass; tune to fill VRAM.
     verbose : bool
-        Whether to print progress.
+        Print loss every 10 epochs.
 
     Returns
     -------
     TrainingResult
-        Training results including initial/final parameters and loss history.
-
-    Notes
-    -----
-    Gradients are accumulated over mixtures before each optimizer
-    step. Only one mixture's computation graph is held in memory at once.
-
-    Examples
-    --------
-    >>> result = train_parameters(
-    ...     trainable, dataset, tensor_systems,
-    ...     n_epochs=100, learning_rate=0.01
-    ... )
-    >>> result.energy_losses[-1]  # Final energy loss
-    0.0023
+        Loss history and initial/final parameters.
     """
     initial_params = trainable.to_values().clone()
     params = trainable.to_values().to(device).detach().requires_grad_(True)
 
-    # Initially perturb the parameters
+    # Perturb initial parameters
     with torch.no_grad():
         params += torch.empty_like(params).uniform_(
             -initial_perturbation, initial_perturbation
@@ -452,69 +620,46 @@ def train_parameters(
     energy_losses = []
     force_losses = []
 
-    for epoch in range(n_epochs):
+    for epoch in tqdm(range(n_epochs), desc="Epochs"):
         optimizer.zero_grad()
 
-        epoch_energy_loss = torch.tensor(0.0, device=device)
-        epoch_force_loss = torch.tensor(0.0, device=device)
+        epoch_energy_loss = 0.0
+        epoch_force_loss = 0.0
         n_mixtures = 0
 
-        force_field = trainable.to_force_field(params.abs()).to(device)
-
-        # Process one mixture at a time and accumulate gradients.
-        # Since mixtures are independent, loss = sum_i loss_i, so
-        # grad(loss) = sum_i grad(loss_i)
-        for entry in dataset:
-            prediction = predict_energies_forces(
-                [entry],
-                force_field,
-                tensor_systems,
+        for entry in tqdm(dataset, desc=f"Epoch {epoch} mixtures", leave=False):
+            e_loss, f_loss = _train_on_entry(
+                entry=entry,
+                params=params,
+                trainable=trainable,
+                tensor_systems=tensor_systems,
+                device=device,
                 reference=reference,
                 normalize=normalize,
                 energy_cutoff=energy_cutoff,
                 weighting_method=weighting_method,
                 weighting_temperature=weighting_temperature,
-                device=device,
-            )
-
-            loss = compute_loss(
-                prediction.energy_ref,
-                prediction.energy_pred,
-                prediction.forces_ref,
-                prediction.forces_pred,
-                weights_energy=prediction.weights_energy,
-                weights_forces=prediction.weights_forces,
                 energy_weight=energy_weight,
                 force_weight=force_weight,
+                frame_batch_size=frame_batch_size,
             )
-
-            # Backpropagate
-            e_loss = loss.energy_loss.detach().item()
-            f_loss = loss.force_loss.detach().item()
-
-            loss.total_loss.backward()
-
-            del prediction, loss
-            torch.cuda.empty_cache()
-
             epoch_energy_loss += e_loss
             epoch_force_loss += f_loss
             n_mixtures += 1
 
         optimizer.step()
 
-        # Average losses across mixtures for logging
         if n_mixtures > 0:
-            epoch_energy_loss = epoch_energy_loss / n_mixtures
-            epoch_force_loss = epoch_force_loss / n_mixtures
+            epoch_energy_loss /= n_mixtures
+            epoch_force_loss /= n_mixtures
 
-        energy_losses.append(epoch_energy_loss.item())
-        force_losses.append(epoch_force_loss.item())
+        energy_losses.append(epoch_energy_loss)
+        force_losses.append(epoch_force_loss)
 
         if verbose and epoch % 10 == 0:
             print(
-                f"Epoch {epoch}: loss_energy = {epoch_energy_loss.item():.4e}, "
-                f"loss_forces = {epoch_force_loss.item():.4e}"
+                f"Epoch {epoch}: loss_energy = {epoch_energy_loss:.4e}, "
+                f"loss_forces = {epoch_force_loss:.4e}"
             )
 
     return TrainingResult(
