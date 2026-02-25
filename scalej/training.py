@@ -394,15 +394,16 @@ def _train_on_entry(
 
     _dtype = params.dtype
     coords_raw = (
-        torch.tensor(entry["coords"], dtype=_dtype)
+        torch.as_tensor(entry["coords"], dtype=_dtype, device=device)
+        .clone()
+        .detach()
         .reshape(len(energy_ref_raw), -1, 3)
-        .to(device)
     )
     box_vectors = (
-        torch.tensor(entry["box_vectors"], dtype=_dtype)
-        .reshape(len(energy_ref_raw), 3, 3)
-        .to(device)
+        torch.as_tensor(entry["box_vectors"], dtype=_dtype, device=device)
+        .clone()
         .detach()
+        .reshape(len(energy_ref_raw), 3, 3)
     )
 
     system = tensor_systems[mixture_id].to(device)
@@ -411,7 +412,6 @@ def _train_on_entry(
     n_frames = len(energy_ref_raw)
 
     energy_ref_n = (energy_ref_raw / n_mols).detach()
-
 
     # Pre-pass to compute reference offsets, Boltzmann weights, normalisers.
     needs_model = reference.lower() in ("mean", "min")
@@ -471,7 +471,6 @@ def _train_on_entry(
 
         inv_n = 1.0 / n_valid if normalize else 1.0
         inv_fn = 1.0 / (n_valid * n_atoms * 3) if normalize else 1.0
-
 
     # Mini-batch grad pass
     total_e_loss = 0.0
@@ -656,10 +655,314 @@ def train_parameters(
         energy_losses.append(epoch_energy_loss)
         force_losses.append(epoch_force_loss)
 
-        if verbose and epoch % 10 == 0:
+        if verbose and epoch % 1 == 0:
             print(
                 f"Epoch {epoch}: loss_energy = {epoch_energy_loss:.4e}, "
                 f"loss_forces = {epoch_force_loss:.4e}"
+            )
+
+    return TrainingResult(
+        initial_parameters=initial_params,
+        trained_parameters=params.abs(),
+        energy_losses=energy_losses,
+        force_losses=force_losses,
+    )
+
+
+def _worker_fn_thread(
+    rank: int,
+    world_size: int,
+    params_snapshot: torch.Tensor,
+    trainable_bytes: bytes,
+    dataset: datasets.Dataset,
+    tensor_systems: dict,
+    reference: str,
+    normalize: bool,
+    energy_cutoff,
+    weighting_method: str,
+    weighting_temperature: float,
+    energy_weight: float,
+    force_weight: float,
+    frame_batch_size: int,
+    results: list,
+) -> None:
+    """
+    Thread worker executed on ``cuda:{rank}``.
+
+    Parameters
+    ----------
+    rank : int
+        Rank of the current thread.
+    world_size : int
+        Total number of threads.
+    params_snapshot : torch.Tensor
+        Snapshot of the parameters to use for this epoch.
+    trainable_bytes : bytes
+        Serialized trainable object.
+        This is the result of ``torch.save(trainable, buf)`` in the main thread.
+        Each worker deserialises its own copy with ``torch.load`` so that
+        ``to_force_field()`` calls are fully isolated (no shared mutable state
+        between threads) and non-leaf tensors inside the trainable are safely
+        reconstructed as plain leaf tensors.
+    dataset : datasets.Dataset
+        Training dataset.
+    tensor_systems : dict
+        Dictionary of tensor systems.
+    reference : str
+        Reference energy subtraction mode.
+    normalize : bool
+        Whether to normalize losses by variance.
+    energy_cutoff : float
+        Energy cutoff for excluding frames.
+    weighting_method : str
+        Weighting method for conformers.
+    weighting_temperature : float
+        Temperature for Boltzmann weighting.
+    energy_weight : float
+        Weight for energy loss term.
+    force_weight : float
+        Weight for force loss term.
+    frame_batch_size : int
+        Number of frames to process per batch.
+    results : list
+        List to store results.
+    """
+    import io as _io
+
+    device = f"cuda:{rank}"
+    torch.cuda.set_device(rank)
+
+    # Deserialise a thread-local trainable with all tensors on CPU
+    local_trainable = torch.load(
+        _io.BytesIO(trainable_bytes), weights_only=False, map_location="cpu"
+    )
+
+    # Keep params on CPU. This will be moved to cuda:rank inside _train_on_entry
+    params_local = params_snapshot.detach().clone().requires_grad_(True)
+
+    total_e_loss = 0.0
+    total_f_loss = 0.0
+    n_entries = 0
+
+    # Interleaved slicing distributes entries evenly across threads.
+    indices = list(range(rank, len(dataset), world_size))
+
+    for idx in indices:
+        entry = dataset[idx]
+        e_loss, f_loss = _train_on_entry(
+            entry=entry,
+            params=params_local,
+            trainable=local_trainable,
+            tensor_systems=tensor_systems,
+            device=device,
+            reference=reference,
+            normalize=normalize,
+            energy_cutoff=energy_cutoff,
+            weighting_method=weighting_method,
+            weighting_temperature=weighting_temperature,
+            energy_weight=energy_weight,
+            force_weight=force_weight,
+            frame_batch_size=frame_batch_size,
+        )
+        total_e_loss += e_loss
+        total_f_loss += f_loss
+        n_entries += 1
+
+    grad_cpu = (
+        params_local.grad.detach().cpu()
+        if params_local.grad is not None
+        else torch.zeros_like(params_snapshot)
+    )
+
+    results[rank] = (total_e_loss, total_f_loss, n_entries, grad_cpu)
+
+
+def train_parameters_ddp(
+    trainable: "descent.train.Trainable",
+    dataset: datasets.Dataset,
+    tensor_systems: dict[str, smee.TensorSystem],
+    n_gpus: int = 2,
+    n_epochs: int = 100,
+    learning_rate: float = 0.01,
+    energy_weight: float = 1.0,
+    force_weight: float = 1.0,
+    reference: Literal["mean", "min", "none"] = "none",
+    normalize: bool = True,
+    energy_cutoff: float | None = None,
+    weighting_method: Literal["uniform", "boltzmann"] = "uniform",
+    weighting_temperature: float = 298.15,
+    initial_perturbation: float = 0.2,
+    frame_batch_size: int = 8,
+    verbose: bool = True,
+) -> TrainingResult:
+    """
+    Train parameters using data-parallel multi-GPU evaluation.
+
+    Notes
+    -----
+    Dataset entries are distributed across ``n_gpus`` CUDA devices in an
+    interleaved fashion (``rank, rank + n_gpus, rank + 2*n_gpus, ...``).
+    Each GPU runs in its own Python thread; the GIL is released during CUDA
+    kernel calls and autograd, so GPU computation proceeds in parallel.
+    Each thread holds its own ``deepcopy`` of *trainable* and its own clone
+    of the parameter tensor, so there is no shared mutable state between
+    threads.  Gradients are averaged on the main thread before each
+    optimizer step.
+
+    Parameters
+    ----------
+    trainable : descent.train.Trainable
+        Trainable object with parameters to optimize.
+    dataset : datasets.Dataset
+        Training dataset with reference energies and forces.
+    tensor_systems : dict[str, smee.TensorSystem]
+        Dictionary mapping mixture IDs to tensor systems.
+    n_gpus : int
+        Number of CUDA GPUs to use.  Must be <= ``torch.cuda.device_count()``.
+    n_epochs : int
+        Number of training epochs.
+    learning_rate : float
+        Learning rate for Adam optimizer.
+    energy_weight : float
+        Weight for energy loss term.
+    force_weight : float
+        Weight for force loss term.
+    reference : Literal["mean", "min", "none"]
+        Reference energy subtraction mode.
+    normalize : bool
+        Whether to normalise losses by variance.
+    energy_cutoff : float, optional
+        kcal/mol above minimum; frames above are excluded.
+    weighting_method : Literal["uniform", "boltzmann"]
+        Per-conformer weighting scheme.
+    weighting_temperature : float
+        Temperature in K for Boltzmann weighting.
+    initial_perturbation : float
+        Uniform noise magnitude applied to the initial parameters.
+    frame_batch_size : int
+        Conformers processed per backward pass per thread.
+    verbose : bool
+        Print loss every 10 epochs.
+
+    Returns
+    -------
+    TrainingResult
+        Loss history and initial/final parameters.
+    """
+    import io as _io
+    import threading
+
+    available = torch.cuda.device_count()
+    if available == 0:
+        raise RuntimeError(
+            "train_parameters_ddp requires at least one CUDA GPU, but none were found."
+        )
+    if n_gpus > available:
+        raise ValueError(
+            f"Requested n_gpus={n_gpus} but only {available} CUDA device(s) available."
+        )
+
+    # Get initial parameters
+    initial_params = trainable.to_values().clone()
+    params = initial_params.clone().detach().cpu().requires_grad_(True)
+
+    # Add noise to initial parameters
+    with torch.no_grad():
+        params.data += torch.empty_like(params).uniform_(
+            -initial_perturbation, initial_perturbation
+        )
+
+    # Set up optimizer
+    optimizer = torch.optim.Adam([params], lr=learning_rate, amsgrad=False)
+
+    # Serialise trainable once in the main thread.
+    _buf = _io.BytesIO()
+    torch.save(trainable, _buf)
+    trainable_bytes = _buf.getvalue()
+    del _buf
+
+    # Pre-initialise CUDA on every target device serially in the main thread.
+    for _rank in range(n_gpus):
+        with torch.cuda.device(_rank):
+            _ = torch.zeros(1, device=f"cuda:{_rank}")
+            _det = torch.det(torch.eye(3, device=f"cuda:{_rank}"))
+            torch.cuda.synchronize(_rank)
+    del _, _det
+
+    # Lists to store loss history
+    energy_losses: list[float] = []
+    force_losses: list[float] = []
+
+    # Training loop
+    for epoch in tqdm(range(n_epochs), desc="Epochs"):
+        optimizer.zero_grad()
+
+        # Take a detached snapshot of the current params for this epoch.
+        # Each thread clones it onto its own device independently.
+        params_snapshot = params.detach().clone().cpu()
+
+        # Pre-allocate result slots; threads write directly by rank index.
+        results: list = [None] * n_gpus
+
+        threads = []
+        for rank in range(n_gpus):
+            t = threading.Thread(
+                target=_worker_fn_thread,
+                args=(
+                    rank,
+                    n_gpus,
+                    params_snapshot,
+                    trainable_bytes,
+                    dataset,
+                    tensor_systems,
+                    reference,
+                    normalize,
+                    energy_cutoff,
+                    weighting_method,
+                    weighting_temperature,
+                    energy_weight,
+                    force_weight,
+                    frame_batch_size,
+                    results,
+                ),
+                daemon=True,
+            )
+            t.start()
+            threads.append(t)
+
+        for t in threads:
+            t.join()
+
+        # Average gradients over workers that processed at least one entry.
+        all_grads = [r[3] for r in results]
+        n_workers_with_entries = sum(1 for r in results if r[2] > 0)
+
+        if n_workers_with_entries > 0:
+            avg_grad = torch.stack(all_grads).sum(dim=0) / n_workers_with_entries
+        else:
+            avg_grad = torch.zeros_like(params)
+
+        params.grad = avg_grad
+        optimizer.step()
+
+        # Epoch-level loss
+        # r[0] = energy loss
+        # r[1] = force loss
+        # r[2] = number of entries
+        total_e = sum(r[0] for r in results)
+        total_f = sum(r[1] for r in results)
+        total_n = sum(r[2] for r in results)
+
+        epoch_e = total_e / max(total_n, 1)
+        epoch_f = total_f / max(total_n, 1)
+        energy_losses.append(epoch_e)
+        force_losses.append(epoch_f)
+
+        if verbose and epoch % 10 == 0:
+            print(
+                f"Epoch {epoch}: loss_energy = {epoch_e:.4e}, "
+                f"loss_forces = {epoch_f:.4e}  "
+                f"[{n_workers_with_entries}/{n_gpus} GPU(s) active]"
             )
 
     return TrainingResult(

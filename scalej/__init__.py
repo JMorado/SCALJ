@@ -101,6 +101,7 @@ from .training import (
     create_trainable,
     predict_energies_forces,
     train_parameters,
+    train_parameters_ddp,
 )
 
 try:
@@ -145,6 +146,7 @@ __all__ = [
     "predict_energies_forces",
     "compute_loss",
     "train_parameters",
+    "train_parameters_ddp",
     # Evaluation
     "compute_metrics",
     "compute_metrics_from_arrays",
