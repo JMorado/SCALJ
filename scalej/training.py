@@ -178,10 +178,10 @@ def predict_energies_forces(
             coord = coord_raw.detach().requires_grad_(True)
             e = smee.compute_energy(system, force_field, coord, box_vector)
             f = -torch.autograd.grad(
-                e, coord, create_graph=True, retain_graph=True, allow_unused=False
+                e, coord, create_graph=False, retain_graph=False, allow_unused=False
             )[0]
-            energy_pred_list.append(e)
-            forces_pred_list.append(f)
+            energy_pred_list.append(e.detach())
+            forces_pred_list.append(f.detach())
 
         energy_pred = torch.stack(energy_pred_list)
         forces_pred = torch.stack(forces_pred_list)
@@ -967,7 +967,7 @@ def train_parameters_ddp(
 
     return TrainingResult(
         initial_parameters=initial_params,
-        trained_parameters=params.abs(),
+        trained_parameters=params.detach().to(initial_params.device).abs(),
         energy_losses=energy_losses,
         force_losses=force_losses,
     )
