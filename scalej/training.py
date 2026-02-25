@@ -424,6 +424,11 @@ def train_parameters(
     TrainingResult
         Training results including initial/final parameters and loss history.
 
+    Notes
+    -----
+    Gradients are accumulated over mixtures before each optimizer
+    step. Only one mixture's computation graph is held in memory at once.
+
     Examples
     --------
     >>> result = train_parameters(
@@ -450,43 +455,66 @@ def train_parameters(
     for epoch in range(n_epochs):
         optimizer.zero_grad()
 
-        # Predict with current parameters
-        prediction = predict_energies_forces(
-            dataset,
-            trainable.to_force_field(params.abs()).to(device),
-            tensor_systems,
-            reference=reference,
-            normalize=normalize,
-            energy_cutoff=energy_cutoff,
-            weighting_method=weighting_method,
-            weighting_temperature=weighting_temperature,
-            device=device,
-        )
+        epoch_energy_loss = torch.tensor(0.0, device=device)
+        epoch_force_loss = torch.tensor(0.0, device=device)
+        n_mixtures = 0
 
-        # Compute loss
-        loss = compute_loss(
-            prediction.energy_ref,
-            prediction.energy_pred,
-            prediction.forces_ref,
-            prediction.forces_pred,
-            weights_energy=prediction.weights_energy,
-            weights_forces=prediction.weights_forces,
-            energy_weight=energy_weight,
-            force_weight=force_weight,
-        )
+        force_field = trainable.to_force_field(params.abs()).to(device)
 
-        # Backpropagation
-        loss.total_loss.backward()
+        # Process one mixture at a time and accumulate gradients.
+        # Since mixtures are independent, loss = sum_i loss_i, so
+        # grad(loss) = sum_i grad(loss_i)
+        for entry in dataset:
+            prediction = predict_energies_forces(
+                [entry],
+                force_field,
+                tensor_systems,
+                reference=reference,
+                normalize=normalize,
+                energy_cutoff=energy_cutoff,
+                weighting_method=weighting_method,
+                weighting_temperature=weighting_temperature,
+                device=device,
+            )
+
+            loss = compute_loss(
+                prediction.energy_ref,
+                prediction.energy_pred,
+                prediction.forces_ref,
+                prediction.forces_pred,
+                weights_energy=prediction.weights_energy,
+                weights_forces=prediction.weights_forces,
+                energy_weight=energy_weight,
+                force_weight=force_weight,
+            )
+
+            # Backpropagate
+            e_loss = loss.energy_loss.detach().item()
+            f_loss = loss.force_loss.detach().item()
+
+            loss.total_loss.backward()
+
+            del prediction, loss
+            torch.cuda.empty_cache()
+
+            epoch_energy_loss += e_loss
+            epoch_force_loss += f_loss
+            n_mixtures += 1
+
         optimizer.step()
 
-        # Record losses
-        energy_losses.append(loss.energy_loss.item())
-        force_losses.append(loss.force_loss.item())
+        # Average losses across mixtures for logging
+        if n_mixtures > 0:
+            epoch_energy_loss = epoch_energy_loss / n_mixtures
+            epoch_force_loss = epoch_force_loss / n_mixtures
+
+        energy_losses.append(epoch_energy_loss.item())
+        force_losses.append(epoch_force_loss.item())
 
         if verbose and epoch % 10 == 0:
             print(
-                f"Epoch {epoch}: loss_energy = {loss.energy_loss.item():.4e}, "
-                f"loss_forces = {loss.force_loss.item():.4e}"
+                f"Epoch {epoch}: loss_energy = {epoch_energy_loss.item():.4e}, "
+                f"loss_forces = {epoch_force_loss.item():.4e}"
             )
 
     return TrainingResult(
