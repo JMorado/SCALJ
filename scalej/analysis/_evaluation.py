@@ -4,9 +4,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
-import torch
 
-from .models import BenchmarkResult, EvaluationMetrics, PredictionResult
+from ..models import BenchmarkResult, EvaluationMetrics, PredictionResult
 
 if TYPE_CHECKING:
     import datasets
@@ -313,14 +312,13 @@ def evaluate_force_field(
     ... )
     >>> print(f"Energy R²: {metrics.energy_r2:.4f}")
     """
-    from .training import predict_energies_forces
+    from ..training import predict_energies_forces
 
     prediction = predict_energies_forces(
         dataset,
         force_field.to(device),
         tensor_systems=tensor_systems,
         reference=reference,
-        normalize=False,
         device=device,
         energy_cutoff=energy_cutoff,
     )

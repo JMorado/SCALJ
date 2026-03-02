@@ -3,10 +3,11 @@
 import argparse
 from typing import Any
 
-from .. import systems
-from ..cli.utils import create_configs_from_dict, load_config
-from ..io import load_pickle, save_pickle
-from .node import WorkflowNode
+from ..cli._utils import create_configs_from_dict, load_config
+from ..data import _datasets as datasets_mod
+from ..data import load_pickle, save_pickle
+from ..simulation import _systems as systems
+from ._node import WorkflowNode
 
 
 class DatasetNode(WorkflowNode):
@@ -84,7 +85,7 @@ Outputs:
             # Create dataset entry using the public API
             smiles_str = ".".join([comp.smiles for comp in system.components])
 
-            entry = systems.create_dataset_entry(
+            entry = datasets_mod.create_dataset_entry(
                 mixture_id=system.name,
                 smiles=smiles_str,
                 coords_list=coords_scaled,
@@ -94,10 +95,10 @@ Outputs:
             )
 
             # Create dataset using the public API
-            system_dataset = systems.create_dataset([entry])
+            system_dataset = datasets_mod.create_dataset([entry])
             systems_ds[system.name] = system_dataset
 
-            print(f"  Entries: 1")
+            print("  Entries: 1")
             print(f"  Dataset size: {len(system_dataset)}")
 
         # Build composite system and force field using the public API
@@ -129,18 +130,19 @@ Outputs:
 
         print("Composite system created:")
         print(f"  Total components: {len(composite_topologies)}")
-        print(
-            f"  Total molecules: {sum(comp.nmol for system in general_config.systems for comp in system.components)}"
+        n_mols = sum(
+            comp.nmol for system in general_config.systems for comp in system.components
         )
+        print(f"  Total molecules: {n_mols}")
 
         # Combine datasets using the public API
         print(f"\n{'=' * 80}")
         print("Combining datasets...")
         print(f"{'=' * 80}")
 
-        combined_dataset = systems.combine_datasets(systems_ds)
+        combined_dataset = datasets_mod.combine_datasets(systems_ds)
 
-        print(f"Combined dataset created:")
+        print("Combined dataset created:")
         print(f"  Total configurations: {len(combined_dataset)}")
         print(f"  Systems: {', '.join(systems_ds.keys())}")
 

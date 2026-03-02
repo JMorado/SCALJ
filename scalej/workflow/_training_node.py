@@ -5,10 +5,11 @@ from typing import Any
 
 import descent.utils.reporting
 
-from .. import plots, training
-from ..cli.utils import create_configs_from_dict, load_config
-from ..io import load_pickle, save_pickle
-from .node import WorkflowNode
+from .. import training
+from ..analysis import _plots as plots
+from ..cli._utils import create_configs_from_dict, load_config
+from ..data import load_pickle, save_pickle
+from ._node import WorkflowNode
 
 
 class TrainingNode(WorkflowNode):
@@ -67,8 +68,8 @@ Outputs:
 
         # Load configuration
         config_dict = load_config(args.config)
-        _, _, _, training_config, parameter_config, attribute_config = create_configs_from_dict(
-            config_dict
+        _, _, _, training_config, parameter_config, attribute_config = (
+            create_configs_from_dict(config_dict)
         )
 
         # Override training parameters if specified

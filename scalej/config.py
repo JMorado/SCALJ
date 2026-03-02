@@ -1,4 +1,4 @@
-"""Configuration models."""
+"""Pydantic configuration models for simulation, training, and system setup."""
 
 from typing import Literal
 
@@ -32,7 +32,7 @@ class SimulationConfig(BaseModel):
     """
     Configuration for molecular dynamics simulations.
 
-    Attributes
+    Parameters
     ----------
     temperature : openmm.unit.Quantity
         Simulation temperature.
@@ -69,7 +69,9 @@ class SimulationConfig(BaseModel):
 
     friction_coeff: OpenMMQuantity[_INV_PICOSECOND] = pydantic.Field(
         1.0 * _INV_PICOSECOND,
-        description="Langevin friction coefficient with units compatible with 1/picosecond.",
+        description=(
+            "Langevin friction coefficient with units compatible with 1/picosecond."
+        ),
     )
 
     n_minimization_steps: int = pydantic.Field(
@@ -242,7 +244,9 @@ class SystemConfig(BaseModel):
     )
     nmol: list[int] | None = pydantic.Field(
         None,
-        description="Number of molecules for each component (populated during workflow).",
+        description=(
+            "Number of molecules for each component (populated during workflow)."
+        ),
     )
 
 

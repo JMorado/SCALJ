@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from .models import ScalingResult
+from ..models import ScalingResult
 
 if TYPE_CHECKING:
     import smee

@@ -4,10 +4,10 @@ import argparse
 from pathlib import Path
 from typing import Any
 
-from .. import simulation
-from ..cli.utils import create_configs_from_dict, load_config
-from ..io import load_pickle
-from .node import WorkflowNode
+from ..cli._utils import create_configs_from_dict, load_config
+from ..data import load_pickle
+from ..simulation import _simulation as simulation
+from ._node import WorkflowNode
 
 
 class MDNode(WorkflowNode):
@@ -58,9 +58,7 @@ Outputs:
 
         # Load configuration
         config_dict = load_config(args.config)
-        general_config, simulation_config, *_ = create_configs_from_dict(
-            config_dict
-        )
+        general_config, simulation_config, *_ = create_configs_from_dict(config_dict)
 
         self._ensure_output_dir(args.output_dir)
 

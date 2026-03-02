@@ -3,10 +3,10 @@
 import argparse
 import sys
 
-from .utils import generate_config
+from ._utils import generate_config
 
 
-def main():
+def main() -> None:
     """
     Main CLI entry point.
 
@@ -64,18 +64,18 @@ Examples:
     args.func(args)
 
 
-def _add_node_subcommands(subparsers):
+def _add_node_subcommands(subparsers) -> None:
     """Add subcommands for each workflow node."""
-    from ..workflow.benchmark_node import BenchmarkNode
-    from ..workflow.dataset_node import DatasetNode
-    from ..workflow.evaluation_node import EvaluationNode
-    from ..workflow.export_node import ExportNode
-    from ..workflow.md_node import MDNode
-    from ..workflow.ml_potential_node import MLPotentialNode
-    from ..workflow.mlp_md_node import MLPMDNode
-    from ..workflow.scaling_node import ScalingNode
-    from ..workflow.system_setup_node import SystemSetupNode
-    from ..workflow.training_node import TrainingNode
+    from ..workflow._benchmark_node import BenchmarkNode
+    from ..workflow._dataset_node import DatasetNode
+    from ..workflow._evaluation_node import EvaluationNode
+    from ..workflow._export_node import ExportNode
+    from ..workflow._md_node import MDNode
+    from ..workflow._ml_potential_node import MLPotentialNode
+    from ..workflow._mlp_md_node import MLPMDNode
+    from ..workflow._scaling_node import ScalingNode
+    from ..workflow._system_setup_node import SystemSetupNode
+    from ..workflow._training_node import TrainingNode
 
     # Define all workflow nodes
     nodes = [
@@ -120,7 +120,7 @@ def _add_node_subcommands(subparsers):
         node_parser.set_defaults(func=lambda args, nc=node_class: _run_node(nc, args))
 
 
-def _run_node(node_class, args):
+def _run_node(node_class, args) -> None:
     """Execute a workflow node."""
     node = node_class()
     result = node.run(args)

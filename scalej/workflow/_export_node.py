@@ -6,11 +6,11 @@ from typing import Any
 
 from openff.toolkit import ForceField
 
-from ..cli.utils import create_configs_from_dict, load_config
+from ..cli._utils import create_configs_from_dict, load_config
 
 # Import API function
-from ..io import export_forcefield_to_offxml, load_pickle
-from .node import WorkflowNode
+from ..data import export_forcefield_to_offxml, load_pickle
+from ._node import WorkflowNode
 
 
 class ExportNode(WorkflowNode):
@@ -54,7 +54,9 @@ Outputs:
             "--output-name",
             type=str,
             default="optimized_forcefield.offxml",
-            help="Name of output force field file (default: optimized_forcefield.offxml)",
+            help=(
+                "Name of output force field file (default: optimized_forcefield.offxml)"
+            ),
         )
 
     def run(self, args: argparse.Namespace) -> dict[str, Any]:
@@ -82,7 +84,9 @@ Outputs:
             print(f"Loaded initial parameters from {params_file}")
         else:
             raise KeyError(
-                "Parameter file must contain either 'final_force_field' or 'initial_force_field' key"
+                "Parameter file must contain either"
+                " 'final_force_field' or"
+                " 'initial_force_field' key"
             )
         print("Using force field for export")
 
@@ -92,7 +96,8 @@ Outputs:
         force_field = composite_data.get("force_field")
 
         if force_field is None:
-            # TODO: maybe remove this fallback and require the composite system to always include the force field
+            # TODO: maybe remove this fallback and require the
+            # composite system to always include the force field
             print(f"Loading base force field: {general_config.force_field_name}")
             force_field = ForceField(general_config.force_field_name, load_plugins=True)
 

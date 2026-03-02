@@ -31,30 +31,30 @@ Example API Usage
 import importlib.metadata
 
 # Submodules
-from . import cli, config, workflow
+from . import analysis, cli, config, data, simulation, workflow  # noqa: F401
 
-# Energy/force computation
-from .energy import (
-    compute_mlp_energies_forces,
-    compute_mlp_energies_forces_single,
-    run_mlp_relaxation,
-    setup_mlp_simulation,
-)
-
-# Evaluation functions
-from .evaluation import (
+# Evaluation and plotting functions
+from .analysis import (
     compute_metrics,
     compute_metrics_from_arrays,
     evaluate_force_field,
+    plot_energy_vs_scale,
+    plot_parity,
+    plot_training_losses,
     run_thermo_benchmark,
 )
 
-# I/O functions
-from .io import (
+# Data functions
+from .data import (
+    combine_datasets,
+    create_dataset,
+    create_dataset_entry,
+    create_scaled_configurations,
     export_forcefield_to_offxml,
-    load_forcefield,
+    generate_scale_factors,
     load_pickle,
     save_pickle,
+    scale_molecule_positions,
 )
 
 # Data models
@@ -62,43 +62,30 @@ from .models import (
     BenchmarkResult,
     EnergyForceResult,
     EvaluationMetrics,
-    LossResult,
     PredictionResult,
     ScalingResult,
     TrainingResult,
     TrajectoryFrames,
 )
 
-# Scaling functions
-from .scaling import (
-    compute_molecule_coms,
-    create_scaled_configurations,
-    generate_scale_factors,
-    get_box_center,
-    scale_molecule_positions,
-)
-
 # Simulation functions
 from .simulation import (
+    compute_mlp_energies_forces,
+    compute_mlp_energies_forces_single,
+    create_composite_system,
+    create_system_from_smiles,
     generate_initial_coords,
     load_trajectory_frames,
     relax_with_mlp,
     run_md_simulation,
-)
-
-# System setup functions
-from .systems import (
-    combine_datasets,
-    create_composite_system,
-    create_dataset,
-    create_dataset_entry,
-    create_system_from_smiles,
+    run_mlp_relaxation,
+    setup_mlp_simulation,
 )
 
 # Training functions
 from .training import (
-    compute_loss,
     create_trainable,
+    get_losses,
     predict_energies_forces,
     train_parameters,
     train_parameters_ddp,
@@ -113,22 +100,22 @@ __all__ = [
     # Version
     "__version__",
     # Submodules
+    "analysis",
     "cli",
+    "simulation",
     "config",
+    "data",
     "workflow",
     # Data models
     "BenchmarkResult",
     "EnergyForceResult",
     "EvaluationMetrics",
-    "LossResult",
     "PredictionResult",
     "ScalingResult",
     "TrainingResult",
     "TrajectoryFrames",
     # Scaling
     "generate_scale_factors",
-    "compute_molecule_coms",
-    "get_box_center",
     "scale_molecule_positions",
     "create_scaled_configurations",
     # Energy
@@ -144,14 +131,17 @@ __all__ = [
     # Training
     "create_trainable",
     "predict_energies_forces",
-    "compute_loss",
+    "get_losses",
     "train_parameters",
     "train_parameters_ddp",
-    # Evaluation
+    # Evaluation and plotting
     "compute_metrics",
     "compute_metrics_from_arrays",
     "run_thermo_benchmark",
     "evaluate_force_field",
+    "plot_energy_vs_scale",
+    "plot_parity",
+    "plot_training_losses",
     # Systems
     "create_system_from_smiles",
     "create_composite_system",
@@ -162,5 +152,4 @@ __all__ = [
     "load_pickle",
     "save_pickle",
     "export_forcefield_to_offxml",
-    "load_forcefield",
 ]

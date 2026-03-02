@@ -1,5 +1,5 @@
 """CLI module for SCALeJ."""
 
-from .main import main
+from ._main import main
 
 __all__ = ["main"]

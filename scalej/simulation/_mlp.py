@@ -1,4 +1,4 @@
-"""Energy and force computation functions."""
+"""ML potential (MLP) functions — setup, energy/force computation, relaxation."""
 
 from typing import TYPE_CHECKING
 
@@ -8,7 +8,7 @@ import openmm.app
 import openmm.unit
 from tqdm import tqdm
 
-from .models import EnergyForceResult
+from ..models import EnergyForceResult
 
 if TYPE_CHECKING:
     import smee
@@ -239,3 +239,67 @@ def compute_mlp_energies_forces_single(
         box_vectors_list,
         show_progress=show_progress,
     )
+
+
+def relax_with_mlp(
+    tensor_system: "smee.TensorSystem",
+    coords: np.ndarray,
+    box_vectors: np.ndarray,
+    mlp_name: str = "ani2x",
+    n_steps: int = 100,
+    temperature: openmm.unit.Quantity = 300 * openmm.unit.kelvin,
+    friction_coeff: openmm.unit.Quantity = 1.0 / openmm.unit.picoseconds,
+    timestep: openmm.unit.Quantity = 1.0 * openmm.unit.femtoseconds,
+    mlp_device: str = "cuda",
+    platform: str = "CPU",
+) -> tuple[np.ndarray, np.ndarray]:
+    """Relax coordinates using an ML potential.
+
+    Runs short dynamics with an ML potential to relax structures
+    from classical MD to the MLP potential energy surface.
+
+    Parameters
+    ----------
+    tensor_system : smee.TensorSystem
+        The molecular system.
+    coords : np.ndarray
+        Initial coordinates (may have OpenMM units).
+    box_vectors : np.ndarray
+        Initial box vectors (may have OpenMM units).
+    mlp_name : str
+        Name of the ML potential model.
+    n_steps : int
+        Number of relaxation steps.
+    temperature : openmm.unit.Quantity
+        Relaxation temperature.
+    friction_coeff : openmm.unit.Quantity
+        Langevin friction coefficient.
+    timestep : openmm.unit.Quantity
+        Integration timestep.
+    mlp_device : str
+        Device for ML potential.
+    platform : str
+        OpenMM platform.
+
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray]
+        Relaxed coordinates and box vectors.
+
+    Examples
+    --------
+    >>> relaxed_coords, relaxed_box = relax_with_mlp(
+    ...     tensor_system, coords, box_vectors, n_steps=100
+    ... )
+    """
+    simulation = setup_mlp_simulation(
+        tensor_system,
+        mlp_name,
+        temperature=temperature,
+        friction_coeff=friction_coeff,
+        timestep=timestep,
+        mlp_device=mlp_device,
+        platform=platform,
+    )
+
+    return run_mlp_relaxation(simulation, coords, box_vectors, n_steps)

@@ -3,15 +3,16 @@
 import argparse
 from typing import Any
 
-from .. import energy
-from ..cli.utils import create_configs_from_dict, load_config
-from ..io import load_pickle, save_pickle
-from .node import WorkflowNode
+from ..cli._utils import create_configs_from_dict, load_config
+from ..data import load_pickle, save_pickle
+from ..simulation import _mlp as energy
+from ._node import WorkflowNode
 
 
 class MLPotentialNode(WorkflowNode):
     """
-    MLPotential node for computing energies and forces using a machine learning potential.
+    MLPotential node for computing energies and forces
+    using a machine learning potential.
 
     Inputs:
     - system_{system}.pkl: System state from MDNode
@@ -28,15 +29,23 @@ class MLPotentialNode(WorkflowNode):
 
     @classmethod
     def description(cls) -> str:
-        return """MLPotential node for computing energies and forces using a machine learning potential.
-
-Inputs:
-- system_{system}.pkl: System state from MDNode
-- scaled_{system}.pkl: Scaled configurations from ScalingNode
-- config: ML potential name and device settings
-
-Outputs:
-- energies_forces_{system}.pkl: Computed energies and forces using smee"""
+        return (
+            "MLPotential node for computing energies"
+            " and forces using a machine learning"
+            " potential.\n"
+            "\n"
+            "Inputs:\n"
+            "- system_{system}.pkl: System state"
+            " from MDNode\n"
+            "- scaled_{system}.pkl: Scaled"
+            " configurations from ScalingNode\n"
+            "- config: ML potential name and device"
+            " settings\n"
+            "\n"
+            "Outputs:\n"
+            "- energies_forces_{system}.pkl: Computed"
+            " energies and forces using smee"
+        )
 
     @classmethod
     def add_arguments(cls, parser: argparse.ArgumentParser) -> None:
@@ -54,11 +63,7 @@ Outputs:
 
         # Load configuration
         config_dict = load_config(args.config)
-        (
-            general_config,
-            simulation_config,
-            *_
-        ) = create_configs_from_dict(config_dict)
+        (general_config, simulation_config, *_) = create_configs_from_dict(config_dict)
 
         self._ensure_output_dir(args.output_dir)
 

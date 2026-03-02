@@ -4,10 +4,11 @@ import argparse
 from pathlib import Path
 from typing import Any
 
-from .. import energy, simulation
-from ..cli.utils import create_configs_from_dict, load_config
-from ..io import load_pickle, save_pickle
-from .node import WorkflowNode
+from ..cli._utils import create_configs_from_dict, load_config
+from ..data import load_pickle, save_pickle
+from ..simulation import _mlp as energy
+from ..simulation import _simulation as simulation
+from ._node import WorkflowNode
 
 
 class MLPMDNode(WorkflowNode):

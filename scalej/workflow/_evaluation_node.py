@@ -7,10 +7,12 @@ from typing import Any
 
 import numpy as np
 
-from .. import evaluation, plots, training
-from ..cli.utils import create_configs_from_dict, load_config
-from ..io import load_pickle
-from .node import WorkflowNode
+from .. import training
+from ..analysis import _evaluation as evaluation
+from ..analysis import _plots as plots
+from ..cli._utils import create_configs_from_dict, load_config
+from ..data import load_pickle
+from ._node import WorkflowNode
 
 
 class EvaluationNode(WorkflowNode):
@@ -90,7 +92,7 @@ Outputs:
 
         # Load configuration
         config_dict = load_config(args.config)
-        _, _, _, training_config, *_= create_configs_from_dict(config_dict)
+        _, _, _, training_config, *_ = create_configs_from_dict(config_dict)
 
         self._ensure_output_dir(args.output_dir)
 
@@ -110,7 +112,8 @@ Outputs:
         )
         if not force_field:
             raise KeyError(
-                "Parameter file must contain 'final_force_field' or 'initial_force_field'"
+                "Parameter file must contain"
+                " 'final_force_field' or 'initial_force_field'"
             )
 
         # Load dataset
@@ -195,10 +198,14 @@ Outputs:
             json.dump(metrics_data, f, indent=2)
         print(f"\nMetrics saved to: {metrics_file}")
         print(
-            f"  Energy - MAE: {metrics.energy_mae:.4f}, RMSE: {metrics.energy_rmse:.4f}, R²: {metrics.energy_r2:.4f}"
+            f"  Energy - MAE: {metrics.energy_mae:.4f},"
+            f" RMSE: {metrics.energy_rmse:.4f},"
+            f" R²: {metrics.energy_r2:.4f}"
         )
         print(
-            f"  Forces - MAE: {metrics.forces_mae:.4f}, RMSE: {metrics.forces_rmse:.4f}, R²: {metrics.forces_r2:.4f}"
+            f"  Forces - MAE: {metrics.forces_mae:.4f},"
+            f" RMSE: {metrics.forces_rmse:.4f},"
+            f" R²: {metrics.forces_r2:.4f}"
         )
 
         results["metrics"] = metrics_data
@@ -322,7 +329,8 @@ Outputs:
                         [frame_info["e_ref"], frame_info["e_pred"]],
                         frame_plot_file,
                         labels=["Reference", "Predicted"],
-                        lims=(0, 30),
+                        lims=None,
+                        align=(training_config.reference.lower() == "none"),
                     )
                 print(f"  Generated {len(all_frame_data)} per-frame plots\n")
 
@@ -342,7 +350,8 @@ Outputs:
                     [all_e_ref, all_e_pred],
                     overall_plot_file,
                     labels=["Reference", "Predicted"],
-                    lims=(0, 30),
+                    lims=None,
+                    align=(training_config.reference.lower() == "none"),
                 )
                 print(f"  Overall plot: {overall_plot_file}")
                 results["overall_energy_vs_scale"] = str(overall_plot_file)

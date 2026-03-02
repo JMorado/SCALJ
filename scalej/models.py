@@ -10,7 +10,7 @@ import torch
 class ScalingResult:
     """Result from volume scaling computation.
 
-    Attributes
+    Parameters
     ----------
     coords : list[np.ndarray]
         List of scaled coordinate arrays, each with shape (n_atoms, 3).
@@ -163,26 +163,6 @@ class BenchmarkResult:
     hvap_ref: float | None = None
     hvap_pred: float | None = None
     hvap_std: float | None = None
-
-
-@dataclasses.dataclass
-class LossResult:
-    """Loss computation result.
-
-    Attributes
-    ----------
-    total_loss : torch.Tensor
-        Combined weighted loss.
-    energy_loss : torch.Tensor
-        Energy component of loss.
-    force_loss : torch.Tensor
-        Force component of loss.
-    """
-
-    total_loss: torch.Tensor
-    energy_loss: torch.Tensor
-    force_loss: torch.Tensor
-
 
 @dataclasses.dataclass
 class TrajectoryFrames:

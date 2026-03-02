@@ -1,4 +1,4 @@
-"""Plotting utilities for SCALeJ."""
+"""Plotting utilities — parity, loss curves, and energy-vs-scale plots."""
 
 from pathlib import Path
 
@@ -12,7 +12,8 @@ def plot_energy_vs_scale(
     output_path: Path,
     labels: list[str] | None = None,
     lims: tuple[float, float] | None = None,
-):
+    align: bool = True,
+) -> None:
     """
     Plot ML potential energies vs scale factor.
 
@@ -28,6 +29,9 @@ def plot_energy_vs_scale(
         List of labels for the legend.
     lims : tuple[float, float] | None
         Limits for the y-axis.
+    align : bool
+        Whether to align energies by subtracting the minimum of each set.
+        Set to False if energies are already aligned (e.g. to infinite).
     """
     plt.figure(figsize=(8, 6))
 
@@ -40,11 +44,15 @@ def plot_energy_vs_scale(
     ref_normalized = None
     if len(energies_list) > 0:
         # Assuming the first one is reference
-        ref_normalized = energies_list[0] - energies_list[0].min()
+        if align:
+            ref_normalized = energies_list[0] - energies_list[0].min()
+        else:
+            ref_normalized = energies_list[0]
 
     for i, energies in enumerate(energies_list):
-        # Subtract minimum energy to make relative energies
-        energies = energies - energies.min()
+        # Subtract minimum energy to make relative energies if requested
+        if align:
+            energies = energies - energies.min()
 
         rmse_str = ""
         if ref_normalized is not None:
@@ -81,7 +89,7 @@ def plot_training_losses(
     energy_losses: list[float],
     force_losses: list[float],
     output_path: Path,
-):
+) -> None:
     """
     Plot training losses over epochs.
 
@@ -124,7 +132,7 @@ def plot_parity(
     label: str,
     units: str,
     output_path: Path,
-):
+) -> None:
     """
     Plot parity plot of predicted vs reference values.
 

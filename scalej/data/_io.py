@@ -1,4 +1,4 @@
-"""I/O utilities for SCALeJ."""
+"""File I/O utilities — pickle serialisation and force field export."""
 
 import copy
 import pickle as pkl
@@ -105,7 +105,7 @@ def export_forcefield_to_offxml(
     # Determine which handler to use
     tag = (
         "vdW"
-        if forcefield.get_parameter_handler("vdW").parameters
+        if "vdW" in forcefield.registered_parameter_handlers
         else "DoubleExponential"
     )
 
@@ -116,6 +116,8 @@ def export_forcefield_to_offxml(
         col = potential_vdw.parameter_cols[i]
         for j in range(potential_vdw.parameters.shape[0]):
             smirk_id = potential_vdw.parameter_keys[j].id
+            if "EP" in smirk_id:
+                continue
             val = potential_vdw.parameters[j, i]
             unit = (
                 offunit.kilocalories_per_mole if col == "epsilon" else offunit.angstrom
@@ -130,29 +132,3 @@ def export_forcefield_to_offxml(
 
     return forcefield
 
-
-def load_forcefield(
-    forcefield_name: str,
-    load_plugins: bool = True,
-) -> "ForceField":
-    """Load an OpenFF force field by name.
-
-    Parameters
-    ----------
-    forcefield_name : str
-        Name of the force field (e.g., "openff-2.0.0.offxml").
-    load_plugins : bool
-        Whether to load force field plugins.
-
-    Returns
-    -------
-    ForceField
-        The loaded OpenFF force field.
-
-    Examples
-    --------
-    >>> ff = load_forcefield("openff-2.0.0.offxml")
-    """
-    from openff.toolkit import ForceField
-
-    return ForceField(forcefield_name, load_plugins=load_plugins)

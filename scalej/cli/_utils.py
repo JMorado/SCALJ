@@ -65,7 +65,7 @@ def create_configs_from_dict(config_dict: dict) -> tuple:
     )
 
 
-def generate_config(args):
+def generate_config(args) -> None:
     """
     Generate an example configuration file.
 

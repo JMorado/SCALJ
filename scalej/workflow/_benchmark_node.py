@@ -8,9 +8,9 @@ from typing import Any
 import descent.targets.thermo
 import torch
 
-from ..cli.utils import create_configs_from_dict, load_config
-from ..io import load_pickle
-from .node import WorkflowNode
+from ..cli._utils import create_configs_from_dict, load_config
+from ..data import load_pickle
+from ._node import WorkflowNode
 
 
 class BenchmarkNode(WorkflowNode):
@@ -32,15 +32,23 @@ class BenchmarkNode(WorkflowNode):
 
     @classmethod
     def description(cls) -> str:
-        return """Benchmark node for calculating thermodynamic properties (density, Hvap, etc.).
-
-Inputs:
-- trained_parameters.pkl: Trained parameters from TrainingNode
-- composite_system.pkl: Composite system from DatasetNode
-- config: System definitions and benchmark settings
-
-Outputs:
-- benchmark_results.txt: Thermodynamic properties (density, Hvap) with uncertainties"""
+        return (
+            "Benchmark node for calculating thermodynamic"
+            " properties (density, Hvap, etc.).\n"
+            "\n"
+            "Inputs:\n"
+            "- trained_parameters.pkl: Trained parameters"
+            " from TrainingNode\n"
+            "- composite_system.pkl: Composite system"
+            " from DatasetNode\n"
+            "- config: System definitions and benchmark"
+            " settings\n"
+            "\n"
+            "Outputs:\n"
+            "- benchmark_results.txt: Thermodynamic"
+            " properties (density, Hvap)"
+            " with uncertainties"
+        )
 
     @classmethod
     def add_arguments(cls, parser: argparse.ArgumentParser) -> None:
@@ -159,7 +167,7 @@ Outputs:
         dataset = descent.targets.thermo.create_dataset(*entries)
 
         # Run predictions
-        print(f"  Running thermodynamic predictions...")
+        print("  Running thermodynamic predictions...")
         output_dir.mkdir(parents=True, exist_ok=True)
         if cache_dir:
             cache_dir.mkdir(parents=True, exist_ok=True)
@@ -206,7 +214,9 @@ Outputs:
 
         # Load configuration
         config_dict = load_config(args.config)
-        general_config, _, _, training_config, *_ = create_configs_from_dict(config_dict)
+        general_config, _, _, training_config, *_ = create_configs_from_dict(
+            config_dict
+        )
 
         self._ensure_output_dir(args.output_dir)
 
@@ -223,9 +233,10 @@ Outputs:
             print(f"Loaded initial parameters from {params_file}")
         else:
             raise KeyError(
-                f"Parameter file must contain either 'final_params' or 'initial_params' key"
+                "Parameter file must contain either"
+                " 'final_params' or 'initial_params' key"
             )
-        print(f"Using parameters for benchmark")
+        print("Using parameters for benchmark")
 
         # Load composite system
         composite_file = self._output_path(args.output_dir, "composite_system.pkl")
@@ -342,13 +353,19 @@ Outputs:
                 else:
                     density_ref = data["density"].get("ref", 0.0)
                     hvap_ref = data["hvap"].get("ref", 0.0)
+                    d_mean = data["density"]["mean"]
+                    d_std = data["density"]["std"]
                     f.write(
-                        f"  Density: {data['density']['mean']:.4f} ± {data['density']['std']:.4f} g/mL "
-                        f"(ref: {density_ref:.4f})\n"
+                        f"  Density: {d_mean:.4f}"
+                        f" ± {d_std:.4f} g/mL"
+                        f" (ref: {density_ref:.4f})\n"
                     )
+                    h_mean = data["hvap"]["mean"]
+                    h_std = data["hvap"]["std"]
                     f.write(
-                        f"  Hvap: {data['hvap']['mean']:.4f} ± {data['hvap']['std']:.4f} kcal/mol "
-                        f"(ref: {hvap_ref:.4f})\n"
+                        f"  Hvap: {h_mean:.4f}"
+                        f" ± {h_std:.4f} kcal/mol"
+                        f" (ref: {hvap_ref:.4f})\n"
                     )
                 f.write("\n")
 
