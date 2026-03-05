@@ -56,8 +56,9 @@ def _prepare_entry_data(
     n_mols = sum(system.n_copies)
     n_atoms = coords.shape[1]
 
-    # Normalize energies by number of molecules
+    # Normalize energies and forces by number of molecules
     energy_ref = energy_ref / n_mols
+    forces_ref = forces_ref / n_mols
 
     return EntryData(
         energy_ref=energy_ref,
@@ -290,9 +291,6 @@ def _compute_batch_forces(
     """
     Compute forces from energies via autograd.
 
-    Because NNPOps doesn't support double backward for periodic systems,
-    forces are tracked for metrics only.
-
     Parameters
     ----------
     energy_pred_batch : torch.Tensor
@@ -308,7 +306,7 @@ def _compute_batch_forces(
     return -torch.autograd.grad(
         energy_pred_batch.sum(),
         coords_batch,
-        create_graph=False,
+        create_graph=True,
         retain_graph=True,
         allow_unused=False,
     )[0]
@@ -357,7 +355,6 @@ def _process_conformer_batch(
     BatchResult
         Gradients and loss contributions from this batch.
     """
-    n_valid = len(conf_weights.valid_indices)
     batch_indices = conf_weights.valid_indices[batch_start:batch_end]
 
     # Create fresh force_field for this batch (new computation graph)
@@ -396,10 +393,10 @@ def _process_conformer_batch(
     # Compute batch contributions
     energy_diff = energy_pred_shifted - energy_ref_shifted
 
-    # Energy: weighted MSE contribution
+    # Energy: weighted SSE contribution
     batch_weighted_energy_sse = torch.sum(batch_weights * energy_diff**2)
 
-    # Forces: weighted MSE contribution
+    # Forces: weighted SSE contribution
     if config.compute_forces:
         batch_weights_forces = conf_weights.weights_forces[batch_start:batch_end].to(
             dtype=ff_dtype
@@ -409,9 +406,17 @@ def _process_conformer_batch(
     else:
         batch_weighted_force_sse = torch.zeros(1, device=device)
 
-    # Compute energy loss for gradient computation
-    batch_energy_loss = batch_weighted_energy_sse / n_valid / conf_weights.energy_var
-    batch_total_loss = config.energy_weight * batch_energy_loss
+    # Combine energy and force losses for gradient computation
+    # Weights already sum to 1 so no division by n_valid needed
+    batch_energy_loss = batch_weighted_energy_sse / conf_weights.energy_var
+    if config.compute_forces:
+        batch_force_loss = batch_weighted_force_sse / conf_weights.forces_var
+    else:
+        batch_force_loss = torch.zeros(1, device=device, dtype=ff_dtype)
+    batch_total_loss = (
+        config.energy_weight * batch_energy_loss
+        + config.force_weight * batch_force_loss
+    )
 
     # Compute gradient w.r.t. params and free graph
     (batch_grad,) = torch.autograd.grad(
@@ -420,12 +425,11 @@ def _process_conformer_batch(
     batch_grad = batch_grad.detach()
 
     # Compute d(loss)/d(energy_pred_0) for chain rule correction
-    # dL/dE_{0,pred} = -2 * w_E * \sum_i(w_i * diff_i) / N / var_E
+    # dL/dE_{0,pred} = -2 * w_E * sum_i(w_i * diff_i) / var_E
     dloss_d_pred0 = (
         -2.0
         * config.energy_weight
         * torch.sum(batch_weights * energy_diff)
-        / n_valid
         / conf_weights.energy_var
     ).detach()
 
@@ -440,8 +444,6 @@ def _process_conformer_batch(
 def _aggregate_losses(
     total_weighted_energy_sse: torch.Tensor,
     total_weighted_force_sse: torch.Tensor,
-    n_valid: int,
-    n_atoms: int,
     energy_var: torch.Tensor,
     forces_var: torch.Tensor,
     config: LossConfig,
@@ -456,10 +458,6 @@ def _aggregate_losses(
         Accumulated weighted sum of squared energy errors.
     total_weighted_force_sse : torch.Tensor
         Accumulated weighted sum of squared force errors.
-    n_valid : int
-        Number of valid conformers.
-    n_atoms : int
-        Number of atoms per conformer.
     energy_var : torch.Tensor
         Reference energy variance.
     forces_var : torch.Tensor
@@ -474,11 +472,10 @@ def _aggregate_losses(
     tuple[torch.Tensor, torch.Tensor, torch.Tensor]
         Total loss, energy loss, force loss.
     """
-    total_energy_loss = total_weighted_energy_sse / n_valid / energy_var
+    total_energy_loss = total_weighted_energy_sse / energy_var
 
     if config.compute_forces:
-        n_force_elements = n_valid * n_atoms * 3
-        total_force_loss = total_weighted_force_sse / n_force_elements / forces_var
+        total_force_loss = total_weighted_force_sse / forces_var
     else:
         total_force_loss = torch.zeros(1, device=device)
 
@@ -499,7 +496,8 @@ def _apply_reference_gradient_correction(
     Apply chain rule correction for minimum-reference gradient.
 
     Final gradient assembly:
-    \nabla_{\theta} L = \nabla_{\theta} L|_{batch} + (\partial L / \partial E_{ref}) * \nabla_{\theta} E_{ref}
+    \nabla_{\theta} L = \nabla_{\theta} L|_{batch}
+        + (\partial L / \partial E_{ref}) * \nabla_{\theta} E_{ref}
 
     Parameters
     ----------
@@ -667,8 +665,6 @@ def get_losses(
     total_loss, total_energy_loss, total_force_loss = _aggregate_losses(
         total_weighted_energy_sse=total_weighted_energy_sse,
         total_weighted_force_sse=total_weighted_force_sse,
-        n_valid=n_valid,
-        n_atoms=entry_data.n_atoms,
         energy_var=conf_weights.energy_var,
         forces_var=conf_weights.forces_var,
         config=config,
