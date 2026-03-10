@@ -70,6 +70,7 @@ from .models import (
 
 # Simulation functions
 from .simulation import (
+    compute_ase_energies_forces,
     compute_mlp_energies_forces,
     compute_mlp_energies_forces_single,
     create_composite_system,

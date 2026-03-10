@@ -1,6 +1,7 @@
 """Simulation module — system setup, MD simulation, and MLP computation."""
 
 from ._mlp import (
+    compute_ase_energies_forces,
     compute_mlp_energies_forces,
     compute_mlp_energies_forces_single,
     relax_with_mlp,
@@ -18,6 +19,8 @@ from ._systems import (
 )
 
 __all__ = [
+    # ASE
+    "compute_ase_energies_forces",
     # MLP
     "compute_mlp_energies_forces",
     "compute_mlp_energies_forces_single",
