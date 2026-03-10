@@ -11,7 +11,10 @@ from tqdm import tqdm
 from ..models import EnergyForceResult
 
 if TYPE_CHECKING:
+    import ase
     import smee
+
+_EV_TO_KCAL_MOL = 23.06054194533
 
 
 def setup_mlp_simulation(
@@ -303,3 +306,116 @@ def relax_with_mlp(
     )
 
     return run_mlp_relaxation(simulation, coords, box_vectors, n_steps)
+
+
+def atoms_template_from_tensor_system(
+    tensor_system: "smee.TensorSystem",
+) -> "ase.Atoms":
+    """Build an ASE Atoms template from a smee TensorSystem.
+
+    Reconstructs the chemical species (atomic numbers) in the same order as
+    they appear in the system without assigning positions — positions are set
+    per-frame inside the compute functions.
+
+    Parameters
+    ----------
+    tensor_system : smee.TensorSystem
+        The molecular system whose topologies define the atom ordering.
+
+    Returns
+    -------
+    ase.Atoms
+        Atoms object with correct atomic numbers and zeroed positions.
+
+    Examples
+    --------
+    >>> atoms = atoms_template_from_tensor_system(tensor_system)
+    """
+    import ase
+
+    atomic_nums = []
+    for topology, n_copy in zip(tensor_system.topologies, tensor_system.n_copies):
+        atomic_nums.extend(topology.atomic_nums.tolist() * n_copy)
+
+    n_atoms = len(atomic_nums)
+    return ase.Atoms(numbers=atomic_nums, positions=np.zeros((n_atoms, 3)))
+
+
+def compute_ase_energies_forces(
+    tensor_system: "smee.TensorSystem",
+    calculator,
+    coords_list: list[np.ndarray],
+    box_vectors_list: list[np.ndarray],
+    charge: int = 0,
+    spin: int = 1,
+    external_field: list[float] | None = None,
+    show_progress: bool = True,
+) -> EnergyForceResult:
+    """
+    Compute energies and forces for configurations using an ASE calculator.
+
+    Parameters
+    ----------
+    tensor_system : smee.TensorSystem
+        The molecular system from which the ASE atoms template is derived.
+    calculator : ase.calculators.calculator.Calculator
+        Any ASE-compatible calculator.
+    coords_list : list[np.ndarray]
+        List of coordinate arrays in Angstrom, each with shape (n_atoms, 3).
+    box_vectors_list : list[np.ndarray]
+        List of box vector arrays in Angstrom, each with shape (3, 3).
+    charge : int
+        Total charge passed via ``atoms.info["charge"]``.
+    spin : int
+        Spin multiplicity passed via ``atoms.info["spin"]``.
+    external_field : list[float] | None
+        External field vector [Fx, Fy, Fz] passed via
+        ``atoms.info["external_field"]``.  Defaults to [0.0, 0.0, 0.0].
+    show_progress : bool
+        Whether to show a progress bar.
+
+    Returns
+    -------
+    EnergyForceResult
+        Result containing energies [kcal/mol] and forces [kcal/mol/Å].
+
+    Examples
+    --------
+    >>> calc = setup_mace_polar_calculator()
+    >>> result = compute_ase_energies_forces(
+    ...     tensor_system, calc, coords_list, box_vectors_list
+    ... )
+    """
+    atoms = atoms_template_from_tensor_system(tensor_system)
+
+    if external_field is None:
+        external_field = [0.0, 0.0, 0.0]
+
+    energies = []
+    forces = []
+
+    iterator = zip(coords_list, box_vectors_list)
+    if show_progress:
+        iterator = tqdm(
+            iterator,
+            total=len(coords_list),
+            desc="Computing ASE energies/forces",
+        )
+
+    for coords, box_vectors in iterator:
+        atoms_frame = atoms.copy()
+        atoms_frame.set_positions(coords)
+        atoms_frame.set_cell(box_vectors)
+        atoms_frame.set_pbc(True)
+        atoms_frame.info["charge"] = charge
+        atoms_frame.info["spin"] = spin
+        atoms_frame.info["external_field"] = external_field
+        atoms_frame.calc = calculator
+
+        energies.append(atoms_frame.get_potential_energy() * _EV_TO_KCAL_MOL)
+        forces.append(atoms_frame.get_forces() * _EV_TO_KCAL_MOL)
+
+    return EnergyForceResult(
+        energies=np.array(energies),
+        forces=np.array(forces),
+    )
