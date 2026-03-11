@@ -70,6 +70,7 @@ from .models import (
 
 # Simulation functions
 from .simulation import (
+    atoms_template_from_tensor_system,
     compute_ase_energies_forces,
     compute_mlp_energies_forces,
     compute_mlp_energies_forces_single,
@@ -123,8 +124,10 @@ __all__ = [
     "setup_mlp_simulation",
     "run_mlp_relaxation",
     "compute_mlp_energies_forces",
-    "compute_mlp_energies_forces_single",
+    "compute_mlp_energies_forces_single"
+    "compute_ase_energies_forces",
     # Simulation
+    "atoms_template_from_tensor_system",
     "run_md_simulation",
     "load_trajectory_frames",
     "generate_initial_coords",

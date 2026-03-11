@@ -1,6 +1,7 @@
 """Simulation module — system setup, MD simulation, and MLP computation."""
 
 from ._mlp import (
+    atoms_template_from_tensor_system,
     compute_ase_energies_forces,
     compute_mlp_energies_forces,
     compute_mlp_energies_forces_single,
@@ -21,6 +22,7 @@ from ._systems import (
 __all__ = [
     # ASE
     "compute_ase_energies_forces",
+    "atoms_template_from_tensor_system",
     # MLP
     "compute_mlp_energies_forces",
     "compute_mlp_energies_forces_single",
