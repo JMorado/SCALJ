@@ -10,6 +10,7 @@ def create_system_from_smiles(
     smiles_list: list[str],
     nmol_list: list[int],
     forcefield_name: str = "openff-2.0.0.offxml",
+    charge_assignment_callback: callable | None = None,
 ) -> tuple[smee.TensorSystem, smee.TensorForceField, list[smee.TensorTopology]]:
     """Create a tensor system from SMILES strings.
 
@@ -37,6 +38,9 @@ def create_system_from_smiles(
     force_field = ForceField(forcefield_name, load_plugins=True)
 
     mols = [Molecule.from_smiles(smiles) for smiles in smiles_list]
+    if charge_assignment_callback is not None:
+        for mol in mols:
+            charge_assignment_callback(mol)
     interchanges = [Interchange.from_smirnoff(force_field, [mol]) for mol in mols]
 
     tensor_forcefield, topologies = smee.converters.convert_interchange(interchanges)
@@ -48,6 +52,7 @@ def create_system_from_smiles(
 def create_composite_system(
     systems_config: list[dict],
     forcefield_name: str = "openff-2.0.0.offxml",
+    charge_assignment_callback: callable | None = None,
 ) -> tuple[
     smee.TensorForceField,
     smee.TensorSystem,
@@ -95,8 +100,17 @@ def create_composite_system(
         for comp in system["components"]
     ]
 
+    if charge_assignment_callback is not None:
+        for mol in composite_mols:
+            charge_assignment_callback(mol)
+
     composite_interchanges = [
-        Interchange.from_smirnoff(force_field, [mol]) for mol in composite_mols
+        Interchange.from_smirnoff(
+            force_field=force_field,
+            topology=[mol],
+            charge_from_molecules=[mol] if charge_assignment_callback else None,
+        )
+        for mol in composite_mols
     ]
 
     composite_tensor_forcefield, composite_topologies = (
