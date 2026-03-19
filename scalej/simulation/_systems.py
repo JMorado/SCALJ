@@ -1,5 +1,7 @@
 """System creation functions for tensor systems and force fields."""
 
+from typing import Optional
+
 import smee
 import smee.converters
 from openff.interchange import Interchange
@@ -10,7 +12,7 @@ def create_system_from_smiles(
     smiles_list: list[str],
     nmol_list: list[int],
     forcefield_name: str = "openff-2.0.0.offxml",
-    charge_assignment_callback: callable | None = None,
+    charge_assignment_callback: Optional[callable] = None,
 ) -> tuple[smee.TensorSystem, smee.TensorForceField, list[smee.TensorTopology]]:
     """Create a tensor system from SMILES strings.
 
@@ -52,7 +54,7 @@ def create_system_from_smiles(
 def create_composite_system(
     systems_config: list[dict],
     forcefield_name: str = "openff-2.0.0.offxml",
-    charge_assignment_callback: callable | None = None,
+    charge_assignment_callback: Optional[callable] = None,
 ) -> tuple[
     smee.TensorForceField,
     smee.TensorSystem,
