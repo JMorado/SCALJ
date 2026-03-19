@@ -7,6 +7,7 @@ from ._evaluation import (
     run_thermo_benchmark,
 )
 from ._plots import plot_energy_vs_scale, plot_parity, plot_training_losses
+from ._summary import ThermodynamicSummary, TrainingSummary
 
 __all__ = [
     # Evaluation
@@ -18,4 +19,7 @@ __all__ = [
     "plot_energy_vs_scale",
     "plot_parity",
     "plot_training_losses",
+    # Summary
+    "ThermodynamicSummary",
+    "TrainingSummary",
 ]
