@@ -1,7 +1,6 @@
 """Molecular dynamics simulation functions."""
 
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import numpy as np
 import openmm
@@ -12,13 +11,10 @@ from tqdm import tqdm
 
 from ..models import TrajectoryFrames
 
-if TYPE_CHECKING:
-    import smee
-
 
 def run_md_simulation(
-    tensor_system: "smee.TensorSystem",
-    tensor_forcefield: "smee.TensorForceField",
+    tensor_system: smee.TensorSystem,
+    tensor_forcefield: smee.TensorForceField,
     output_path: Path | str,
     temperature: openmm.unit.Quantity = 300 * openmm.unit.kelvin,
     pressure: openmm.unit.Quantity = 1.0 * openmm.unit.atmosphere,
@@ -217,8 +213,8 @@ def load_trajectory_frames(
 
 
 def generate_initial_coords(
-    tensor_system: "smee.TensorSystem",
-    tensor_forcefield: "smee.TensorForceField",
+    tensor_system: smee.TensorSystem,
+    tensor_forcefield: smee.TensorForceField,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Generate initial coordinates for a system using SMEE packmol.
 

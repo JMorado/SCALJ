@@ -113,6 +113,7 @@ def create_dataset(entries: list[dict]) -> datasets.Dataset:
     )
 
     dataset = datasets.Dataset(datasets.table.InMemoryTable(table))
+    dataset.set_format("torch")
     return dataset
 
 

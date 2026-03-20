@@ -104,22 +104,20 @@ def _run_epoch(
         entry = {k: v.to(device) if hasattr(v, "to") else v for k, v in entry.items()}
 
         # Compute loss and gradient for this entry
-        entry_loss, entry_energy_loss, entry_force_loss, entry_grad = (
-            get_losses(
-                params,
-                trainable,
-                entry,
-                tensor_systems,
-                conformer_batch_size=conformer_batch_size,
-                energy_weight=config.energy_weight,
-                force_weight=config.force_weight,
-                reference=config.reference,
-                energy_cutoff=config.energy_cutoff,
-                weighting_method=config.weighting_method,
-                weighting_temperature=config.weighting_temperature,
-                device=device,
-                compute_forces=config.compute_forces,
-            )
+        entry_loss, entry_energy_loss, entry_force_loss, entry_grad = get_losses(
+            params,
+            trainable,
+            entry,
+            tensor_systems,
+            conformer_batch_size=conformer_batch_size,
+            energy_weight=config.energy_weight,
+            force_weight=config.force_weight,
+            reference=config.reference,
+            energy_cutoff=config.energy_cutoff,
+            weighting_method=config.weighting_method,
+            weighting_temperature=config.weighting_temperature,
+            device=device,
+            compute_forces=config.compute_forces,
         )
 
         # Accumulate gradient
@@ -154,11 +152,7 @@ def train_parameters(
     compute_forces: bool = True,
 ) -> TrainingResult:
     """
-    Train force field parameters to match reference data (memory-efficient).
-
-    Uses gradient-based optimization with memory-efficient gradient accumulation.
-    Key optimization: Gradients are computed via torch.autograd.grad() and
-    immediately detached after each conformer batch to prevent memory buildup.
+    Train force field parameters to match reference data.
 
     Parameters
     ----------
@@ -230,7 +224,6 @@ def train_parameters(
     n_entries = len(dataset)
 
     for epoch in range(n_epochs):
-        # Run epoch
         accumulated_grad, epoch_loss, epoch_energy_loss, epoch_force_loss = _run_epoch(
             params=params,
             trainable=trainable,

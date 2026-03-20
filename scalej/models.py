@@ -164,6 +164,7 @@ class BenchmarkResult:
     hvap_pred: float | None = None
     hvap_std: float | None = None
 
+
 @dataclasses.dataclass
 class TrajectoryFrames:
     """Container for trajectory frame data.

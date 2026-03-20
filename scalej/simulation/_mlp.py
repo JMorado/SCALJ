@@ -1,24 +1,20 @@
 """ML potential (MLP) functions — setup, energy/force computation, relaxation."""
 
-from typing import TYPE_CHECKING
-
+import ase
 import numpy as np
 import openmm
 import openmm.app
 import openmm.unit
+import smee
 from tqdm import tqdm
 
 from ..models import EnergyForceResult
-
-if TYPE_CHECKING:
-    import ase
-    import smee
 
 _EV_TO_KCAL_MOL = 23.06054194533
 
 
 def setup_mlp_simulation(
-    tensor_system: "smee.TensorSystem",
+    tensor_system: smee.TensorSystem,
     mlp_name: str,
     temperature: openmm.unit.Quantity = 300 * openmm.unit.kelvin,
     friction_coeff: openmm.unit.Quantity = 1.0 / openmm.unit.picoseconds,
@@ -188,7 +184,7 @@ def compute_mlp_energies_forces(
 
 
 def compute_mlp_energies_forces_single(
-    tensor_system: "smee.TensorSystem",
+    tensor_system: smee.TensorSystem,
     coords_list: list[np.ndarray],
     box_vectors_list: list[np.ndarray],
     mlp_name: str = "ani2x",
@@ -245,7 +241,7 @@ def compute_mlp_energies_forces_single(
 
 
 def relax_with_mlp(
-    tensor_system: "smee.TensorSystem",
+    tensor_system: smee.TensorSystem,
     coords: np.ndarray,
     box_vectors: np.ndarray,
     mlp_name: str = "ani2x",
@@ -309,8 +305,8 @@ def relax_with_mlp(
 
 
 def atoms_template_from_tensor_system(
-    tensor_system: "smee.TensorSystem",
-) -> "ase.Atoms":
+    tensor_system: smee.TensorSystem,
+) -> ase.Atoms:
     """Build an ASE Atoms template from a smee TensorSystem.
 
     Reconstructs the chemical species (atomic numbers) in the same order as
@@ -342,7 +338,7 @@ def atoms_template_from_tensor_system(
 
 
 def compute_ase_energies_forces(
-    tensor_system: "smee.TensorSystem",
+    tensor_system: smee.TensorSystem,
     calculator,
     coords_list: list[np.ndarray],
     box_vectors_list: list[np.ndarray],

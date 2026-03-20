@@ -1,15 +1,13 @@
 """Evaluation functions for force field assessment."""
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
+import datasets
 import numpy as np
+import smee
 
 from ..models import BenchmarkResult, EvaluationMetrics, PredictionResult
-
-if TYPE_CHECKING:
-    import datasets
-    import smee
 
 
 def compute_metrics(
@@ -135,7 +133,7 @@ def compute_metrics_from_arrays(
 
 
 def run_thermo_benchmark(
-    force_field: "smee.TensorForceField",
+    force_field: smee.TensorForceField,
     topologies: dict[str, Any],
     smiles_a: str,
     smiles_b: str | None = None,
@@ -274,9 +272,9 @@ def run_thermo_benchmark(
 
 
 def evaluate_force_field(
-    force_field: "smee.TensorForceField",
-    dataset: "datasets.Dataset",
-    tensor_systems: dict[str, "smee.TensorSystem"],
+    force_field: smee.TensorForceField,
+    dataset: datasets.Dataset,
+    tensor_systems: dict[str, smee.TensorSystem],
     reference: str = "none",
     energy_cutoff: float | None = None,
     device: str = "cpu",

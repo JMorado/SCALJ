@@ -85,22 +85,20 @@ def _worker_fn_ddp(
                 k: v.to(device) if hasattr(v, "to") else v for k, v in entry.items()
             }
 
-            entry_loss, entry_energy_loss, entry_force_loss, entry_grad = (
-                get_losses(
-                    params_local,
-                    local_trainable,
-                    entry,
-                    tensor_systems,
-                    conformer_batch_size=conformer_batch_size,
-                    energy_weight=config.energy_weight,
-                    force_weight=config.force_weight,
-                    reference=config.reference,
-                    energy_cutoff=config.energy_cutoff,
-                    weighting_method=config.weighting_method,
-                    weighting_temperature=config.weighting_temperature,
-                    device=device,
-                    compute_forces=config.compute_forces,
-                )
+            entry_loss, entry_energy_loss, entry_force_loss, entry_grad = get_losses(
+                params_local,
+                local_trainable,
+                entry,
+                tensor_systems,
+                conformer_batch_size=conformer_batch_size,
+                energy_weight=config.energy_weight,
+                force_weight=config.force_weight,
+                reference=config.reference,
+                energy_cutoff=config.energy_cutoff,
+                weighting_method=config.weighting_method,
+                weighting_temperature=config.weighting_temperature,
+                device=device,
+                compute_forces=config.compute_forces,
             )
 
             # Accumulate
