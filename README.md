@@ -23,7 +23,3 @@ Install SCALeJ in development mode:
 ```bash
 pip install -e .
 ```
-
-## Quick Start
-
-See the `examples/` directory and the module docstring (`import scalej; help(scalej)`) for usage examples.
