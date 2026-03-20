@@ -27,7 +27,8 @@ def create_dataset_entry(
     energies: np.ndarray,
     forces: np.ndarray,
 ) -> dict:
-    """Create a dataset entry from energy/force data.
+    """
+    Create a dataset entry from energy/force data.
 
     Parameters
     ----------
@@ -78,7 +79,8 @@ def create_dataset_entry(
 
 
 def create_dataset(entries: list[dict]) -> datasets.Dataset:
-    """Create a HuggingFace dataset from entry dictionaries.
+    """
+    Create a HuggingFace dataset from entry dictionaries.
 
     Parameters
     ----------
@@ -117,7 +119,8 @@ def create_dataset(entries: list[dict]) -> datasets.Dataset:
 def combine_datasets(
     mixture_datasets: dict[str, datasets.Dataset],
 ) -> datasets.Dataset:
-    """Combine multiple mixture datasets into a single dataset.
+    """
+    Combine multiple mixture datasets into a single dataset.
 
     Parameters
     ----------
