@@ -1,8 +1,5 @@
 """SCALeJ: Lennard-Jones Parameter Fitting via Condensed-Phase Volume-Scaling.
 
-SCALeJ provides both a workflow-based interface (via Snakemake) and
-a programmatic API for fitting Lennard-Jones parameters using ML potentials.
-
 Example API Usage
 -----------------
 >>> import scalej
@@ -31,7 +28,7 @@ Example API Usage
 import importlib.metadata
 
 # Submodules
-from . import analysis, cli, config, data, simulation, workflow  # noqa: F401
+from . import analysis, config, data, simulation  # noqa: F401
 
 # Evaluation and plotting functions
 from .analysis import (
@@ -111,11 +108,9 @@ __all__ = [
     "__version__",
     # Submodules
     "analysis",
-    "cli",
     "simulation",
     "config",
     "data",
-    "workflow",
     # Data models
     "BenchmarkResult",
     "EnergyForceResult",
@@ -132,7 +127,7 @@ __all__ = [
     "setup_mlp_simulation",
     "run_mlp_relaxation",
     "compute_mlp_energies_forces",
-    "compute_mlp_energies_forces_single"
+    "compute_mlp_energies_forces_single",
     "compute_ase_energies_forces",
     # Simulation
     "atoms_template_from_tensor_system",
