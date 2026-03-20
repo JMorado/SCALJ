@@ -1,13 +1,9 @@
 """Volume scaling functions."""
 
-from typing import TYPE_CHECKING
-
 import numpy as np
+import smee
 
 from ..models import ScalingResult
-
-if TYPE_CHECKING:
-    import smee
 
 
 def generate_scale_factors(
@@ -15,10 +11,8 @@ def generate_scale_factors(
     equilibrium_range: tuple[float, float, int] = (0.9, 1.1, 15),
     long_range: tuple[float, float, int] = (1.1, 2.0, 12),
 ) -> np.ndarray:
-    """Generate scale factors for density variation.
-
-    Creates a set of scale factors spanning close, equilibrium, and long-range
-    regions for volume scaling.
+    """
+    Generate scale factors for density variation.
 
     Parameters
     ----------
@@ -53,7 +47,8 @@ def compute_molecule_coms(
     coords: np.ndarray,
     n_atoms_per_mol: int,
 ) -> np.ndarray:
-    """Compute center of mass for each molecule.
+    """
+    Compute center of mass for each molecule.
 
     Parameters
     ----------
@@ -88,7 +83,8 @@ def compute_molecule_coms(
 
 
 def get_box_center(box_vectors: np.ndarray) -> np.ndarray:
-    """Compute the center of the simulation box.
+    """
+    Compute the center of the simulation box.
 
     Parameters
     ----------
@@ -197,12 +193,13 @@ def scale_molecule_positions(
 
 
 def create_scaled_configurations(
-    tensor_system: "smee.TensorSystem",
+    tensor_system: smee.TensorSystem,
     coords: np.ndarray,
     box_vectors: np.ndarray,
     scale_factors: np.ndarray,
 ) -> ScalingResult:
-    """Create a dataset with multiple scaled versions of input configurations.
+    """
+    Create a dataset with multiple scaled versions of input configurations.
 
     Generates scaled configurations by applying each scale factor to the
     input coordinates, scaling molecular positions rigidly around the box center.
