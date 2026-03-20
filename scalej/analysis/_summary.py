@@ -1,36 +1,31 @@
 """Interactive HTML summary tables for thermodynamic and training results."""
 
-from __future__ import annotations
-
 import base64
 import io
 from pathlib import Path
-from typing import TYPE_CHECKING
 
+import matplotlib.figure
 import numpy as np
 import pandas as pd
-
-if TYPE_CHECKING:
-    from openff.toolkit import ForceField
-
-    from ..models import PredictionResult
+from openff.toolkit import ForceField
 
 
 def _smiles_to_labeled_image(
     smiles: str,
-    ff: ForceField,
+    ff: ForceField | None = None,
     handler_key: str = "vdW",
     img_size: tuple[int, int] = (400, 300),
 ) -> str:
     """
-    Render a molecule as a PNG image with force field atom-type labels.
+    Render a molecule as a PNG image, optionally with force-field atom-type labels.
 
     Parameters
     ----------
     smiles : str
         SMILES string of the molecule.
-    ff : ForceField
-        OpenFF force field used to label atoms.
+    ff : ForceField | None
+        OpenFF force field used to label atoms.  When *None* the molecule
+        is rendered without labels.
     handler_key : str
         The parameter handler key to use for labeling (e.g. ``"vdW"``).
     img_size : tuple[int, int]
@@ -45,13 +40,14 @@ def _smiles_to_labeled_image(
     from rdkit.Chem import AllChem, Draw
 
     off_mol = OFFMolecule.from_smiles(smiles, allow_undefined_stereo=True)
-    labels = ff.label_molecules(off_mol.to_topology())[0]
 
     atom_labels: dict[int, str] = {}
-    if handler_key in labels:
-        for atom_indices, param in labels[handler_key].items():
-            for idx in atom_indices:
-                atom_labels[idx] = param.id
+    if ff is not None:
+        labels = ff.label_molecules(off_mol.to_topology())[0]
+        if handler_key in labels:
+            for atom_indices, param in labels[handler_key].items():
+                for idx in atom_indices:
+                    atom_labels[idx] = param.id
 
     rdmol = off_mol.to_rdkit()
     AllChem.Compute2DCoords(rdmol)
@@ -286,6 +282,9 @@ class ThermodynamicSummary:
         row_height = max(320, 340 * max_imgs)
         n_rows = page_size if page_size is not None else max(3, 1200 // row_height)
 
+        ncols = len(summary_df.columns)
+        table_width = max(1800, 300 * ncols)
+
         tabulator = panel.widgets.Tabulator(
             summary_df,
             show_index=False,
@@ -293,7 +292,8 @@ class ThermodynamicSummary:
             disabled=True,
             formatters=formatters,
             configuration={"rowHeight": row_height},
-            sizing_mode="stretch_width",
+            sizing_mode="fixed",
+            width=table_width,
             frozen_columns=["Run", "ID", "Mole Fractions", "Molecule"],
             page_size=n_rows,
             pagination="local",
@@ -302,20 +302,25 @@ class ThermodynamicSummary:
         css = (
             ".tabulator-cell { overflow: visible !important; }"
             ".tabulator-row { overflow: visible !important; }"
-            ".tabulator { overflow-x: auto !important; }"
         )
 
         layout = panel.Column(
             panel.pane.HTML(f"<style>{css}</style>"),
             panel.pane.Markdown("# Mixture Summary"),
             tabulator,
+            sizing_mode="fixed",
+            width=table_width,
         )
-        layout.save(str(output_file), title="Mixture Summary", embed=True)
+
+        out = str(output_file)
+        layout.save(out, title="Mixture Summary", embed=True)
+
+        _patch_html_scroll(Path(out))
         print(f"Summary saved to {output_file}")
 
 
 def _plot_to_base64_img(
-    fig: "matplotlib.figure.Figure",
+    fig: matplotlib.figure.Figure,
     width: int = 600,
     height: int = 350,
 ) -> str:
@@ -345,131 +350,193 @@ def _plot_to_base64_img(
     return f'<img src="data:image/png;base64,{b64}" width="{width}" height="{height}">'
 
 
+def _patch_html_scroll(path: Path) -> None:
+    """Post-process a Panel-saved HTML file to enable horizontal scrolling.
+
+    BokehJS hard-codes ``overflow: hidden`` on ``.bk`` elements and sets the
+    root div to a fixed pixel width.  We override every ``overflow:hidden``
+    occurrence that BokehJS inlines in ``<style>`` blocks, and force the root
+    and body to allow horizontal overflow.
+    """
+    import re
+
+    html = path.read_text(encoding="utf-8")
+
+    # 1. Remove every `overflow: hidden` / `overflow:hidden` that BokehJS injects
+    #    inside <style> blocks (not inside attribute values).
+    html = re.sub(r"overflow\s*:\s*hidden\s*(!important)?", "overflow:visible", html)
+
+    # 2. Inject our own rules at the end of <head> to ensure the page scrolls.
+    patch = (
+        "<style>"
+        "html,body{overflow-x:auto!important;margin:0;padding:8px;}"
+        ".bk-root,.bk{overflow:visible!important;}"
+        "</style>"
+    )
+    html = html.replace("</head>", patch + "</head>", 1)
+
+    path.write_text(html, encoding="utf-8")
+
+
 class TrainingSummary:
     """
     Build and export interactive HTML summary tables for training results.
 
-
     Parameters
     ----------
-    predictions : PredictionResult
-        Predictions from the **trained** force field.
-    initial_predictions : PredictionResult
-        Predictions from the initial (perturbed) force field.
-    initial_predictions_openff : PredictionResult
-        Predictions from the unperturbed OpenFF force field.
-    scale_factors : np.ndarray
-        Scale factors with shape ``(num_samples, num_points)``.
-    df : pd.DataFrame
-        Reference dataset with ``"Id"``, ``"Component 1"``,
-        ``"Component 2"``, ``"Mole Fraction 1"``, and
+    pre_perturbation_parquet : str | Path
+        Path to ``pre_perturbation_evaluations.parquet``.
+    perturbed_parquet : str | Path
+        Path to ``perturbed_evaluations.parquet``.
+    final_parquet : str | Path
+        Path to ``final_evaluations.parquet``.
+    df : pd.DataFrame | None
+        Optional DataFrame with per-mixture component info.  Must contain a
+        ``"mixture_id"`` column (or use ``mixture_id`` as the index) plus
+        ``"Component 1"``, ``"Component 2"``, ``"Mole Fraction 1"``, and
         ``"Mole Fraction 2"`` columns.
+    meta_json : str | Path | None
+        Path to a ``combined_dataset_meta.json`` file.  When given the
+        component names and mole fractions are extracted automatically and
+        *df* is ignored.
     labels : tuple[str, str, str] | None
-        Display labels for (reference, trained, initial_perturbed,
-        initial_openff) curves. Defaults are provided if *None*.
+        Display labels for the (pre_perturbation, perturbed, final) stages.
+        Defaults to ``("Pre-perturbation", "Perturbed", "Final")`` if *None*.
 
     Examples
     --------
     >>> ts = TrainingSummary(
-    ...     predictions, initial_predictions, initial_predictions_openff,
-    ...     scale_factors, df,
+    ...     "pre_perturbation_evaluations.parquet",
+    ...     "perturbed_evaluations.parquet",
+    ...     "final_evaluations.parquet",
+    ...     meta_json="combined_dataset_meta.json",
     ... )
     >>> summary_df = ts.build_summary_df()
     >>> ts.save_summary_html(summary_df, "training_summary.html")
     """
 
+    @staticmethod
+    def _meta_json_to_df(path: str | Path) -> pd.DataFrame:
+        """Parse a ``combined_dataset_meta.json`` into a metadata DataFrame."""
+        import json as _json
+
+        with open(path) as fh:
+            meta = _json.load(fh)
+
+        rows: list[dict] = []
+        for run in meta["runs"]:
+            comps = run["components"]
+            row: dict = {"mixture_id": run["name"]}
+            for i, comp in enumerate(comps, start=1):
+                row[f"Component {i}"] = comp.get("smiles", "")
+                row[f"Mole Fraction {i}"] = comp.get("mole_fraction", 1.0)
+            rows.append(row)
+        return pd.DataFrame(rows)
+
     def __init__(
         self,
-        predictions: PredictionResult,
-        initial_predictions: PredictionResult,
-        initial_predictions_openff: PredictionResult,
-        scale_factors: np.ndarray,
-        df: pd.DataFrame,
-        labels: tuple[str, str, str, str] | None = None,
+        pre_perturbation_parquet: str | Path,
+        perturbed_parquet: str | Path,
+        final_parquet: str | Path,
+        df: pd.DataFrame | None = None,
+        meta_json: str | Path | None = None,
+        labels: tuple[str, str, str] | None = None,
     ) -> None:
-        self._predictions = predictions
-        self._initial_predictions = initial_predictions
-        self._initial_predictions_openff = initial_predictions_openff
-        self._scale_factors = scale_factors
-        self._df = df
-        self._labels = labels or (
-            "Reference (MLP)",
-            "Trained",
-            "Initial (perturbed)",
-            "Initial (unperturbed)",
-        )
+        self._df_pre = pd.read_parquet(pre_perturbation_parquet)
+        self._df_pert = pd.read_parquet(perturbed_parquet)
+        self._df_final = pd.read_parquet(final_parquet)
+        if meta_json is not None:
+            self._meta_df = self._meta_json_to_df(meta_json)
+        else:
+            self._meta_df = df
+        self._labels = labels or ("Pre-perturbation", "Perturbed", "Final")
 
-    def _extract_sample(
-        self, i: int, offset_ptr: int
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, int]:
-        """
-        Extract energy curves for sample *i*.
+    def _get_mixture_ids(self) -> list[str]:
+        """Return sorted unique mixture IDs from the final-stage parquet."""
+        return sorted(self._df_final["mixture_id"].unique().tolist())
 
-        Returns
-        -------
-        x, y_ref, y_pred, y_init, y_init_openff, new_offset_ptr
-        """
-        mask = self._predictions.mask_idxs[i].detach().cpu().numpy()
-        n = len(mask)
+    def _extract_sample(self, mix_id: str) -> dict[str, np.ndarray]:
+        """Extract energy and force arrays for *mix_id* from all three stages."""
 
-        x = self._scale_factors[i, mask]
-        sl = slice(offset_ptr, offset_ptr + n)
+        def _sub(df: pd.DataFrame) -> pd.DataFrame:
+            return df[df["mixture_id"] == mix_id].sort_values("scale_factor")
 
-        y_ref = self._predictions.energy_ref[sl].detach().cpu().numpy()
-        y_pred = self._predictions.energy_pred[sl, 0].detach().cpu().numpy()
-        y_init = self._initial_predictions.energy_pred[sl, 0].detach().cpu().numpy()
-        y_init_off = (
-            self._initial_predictions_openff.energy_pred[sl, 0].detach().cpu().numpy()
-        )
+        def _flat_forces(series: pd.Series) -> np.ndarray:
+            return np.concatenate(
+                [np.asarray(f, dtype=float).reshape(-1) for f in series]
+            )
 
-        return x, y_ref, y_pred, y_init, y_init_off, offset_ptr + n
+        sub_pre = _sub(self._df_pre)
+        sub_pert = _sub(self._df_pert)
+        sub_final = _sub(self._df_final)
 
-    @staticmethod
-    def _compute_sample_metrics(
-        y_ref: np.ndarray,
-        y_pred: np.ndarray,
-        y_init: np.ndarray,
-        y_init_openff: np.ndarray,
-    ) -> dict[str, float]:
-        """Compute RMSE, MAE, and offset for a single sample."""
         return {
-            "RMSE Pred": float(np.sqrt(np.mean((y_pred - y_ref) ** 2))),
-            "RMSE Init": float(np.sqrt(np.mean((y_init - y_ref) ** 2))),
-            "RMSE OpenFF": float(np.sqrt(np.mean((y_init_openff - y_ref) ** 2))),
-            "MAE Pred": float(np.mean(np.abs(y_pred - y_ref))),
-            "MAE Init": float(np.mean(np.abs(y_init - y_ref))),
-            "MAE OpenFF": float(np.mean(np.abs(y_init_openff - y_ref))),
-            "Offset Pred": float(np.mean(y_pred - y_ref)),
-            "Offset Init": float(np.mean(y_init - y_ref)),
-            "Offset OpenFF": float(np.mean(y_init_openff - y_ref)),
+            "scale_factor": sub_final["scale_factor"].to_numpy(dtype=float),
+            "energy_ref": sub_final["energy_ref"].to_numpy(dtype=float),
+            "energy_pred_pre": sub_pre["energy_pred"].to_numpy(dtype=float),
+            "energy_pred_pert": sub_pert["energy_pred"].to_numpy(dtype=float),
+            "energy_pred_final": sub_final["energy_pred"].to_numpy(dtype=float),
+            "forces_ref": _flat_forces(sub_final["forces_ref"]),
+            "forces_pred_pre": _flat_forces(sub_pre["forces_pred"]),
+            "forces_pred_pert": _flat_forces(sub_pert["forces_pred"]),
+            "forces_pred_final": _flat_forces(sub_final["forces_pred"]),
         }
 
-    def _render_plot(
+    @staticmethod
+    def _compute_metrics(data: dict[str, np.ndarray]) -> dict[str, float]:
+        """Compute energy and force RMSE/MAE for all three stages."""
+        metrics: dict[str, float] = {}
+        e_ref = data["energy_ref"]
+        f_ref = data["forces_ref"]
+        for stage_key, label in [
+            ("pre", "PrePert"),
+            ("pert", "Pert"),
+            ("final", "Final"),
+        ]:
+            e_pred = data[f"energy_pred_{stage_key}"]
+            f_pred = data[f"forces_pred_{stage_key}"]
+            metrics[f"E RMSE {label}"] = float(np.sqrt(np.mean((e_pred - e_ref) ** 2)))
+            metrics[f"E MAE {label}"] = float(np.mean(np.abs(e_pred - e_ref)))
+            metrics[f"F RMSE {label}"] = float(np.sqrt(np.mean((f_pred - f_ref) ** 2)))
+            metrics[f"F MAE {label}"] = float(np.mean(np.abs(f_pred - f_ref)))
+        return metrics
+
+    def _render_energy_plot(
         self,
-        x: np.ndarray,
-        y_ref: np.ndarray,
-        y_pred: np.ndarray,
-        y_init: np.ndarray,
-        y_init_openff: np.ndarray,
+        data: dict[str, np.ndarray],
         plot_size: tuple[int, int],
         y_lim: tuple[float, float] | None,
     ) -> str:
-        """
-        Render an energy-vs-scale-factor plot as a base64 ``<img>`` tag."""
+        """Render an energy-vs-scale-factor plot as a base64 ``<img>`` tag."""
         import matplotlib
 
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
 
-        lbl_ref, lbl_pred, lbl_init, lbl_off = self._labels
+        lbl_pre, lbl_pert, lbl_final = self._labels
+        x = data["scale_factor"]
+        e_ref = data["energy_ref"]
+
+        def _e_rmse(key: str) -> str:
+            return f"{np.sqrt(np.mean((data[key] - e_ref) ** 2)):.2e}"
 
         fig, ax = plt.subplots(figsize=(plot_size[0] / 100, plot_size[1] / 100))
-        ax.plot(x, y_ref, label=lbl_ref, color="black", linewidth=1.5, zorder=2)
-        ax.plot(x, y_pred, label=lbl_pred, color="red", linewidth=1.5, zorder=3)
+        ax.plot(
+            x, e_ref, label="Reference (MLP)", color="black", linewidth=1.5, zorder=3
+        )
         ax.plot(
             x,
-            y_init,
-            label=lbl_init,
+            data["energy_pred_pre"],
+            label=f"{lbl_pre} (RMSE={_e_rmse('energy_pred_pre')})",
+            color="blue",
+            linestyle="--",
+            linewidth=1.5,
+            zorder=1,
+        )
+        ax.plot(
+            x,
+            data["energy_pred_pert"],
+            label=f"{lbl_pert} (RMSE={_e_rmse('energy_pred_pert')})",
             color="gray",
             linestyle="--",
             linewidth=1.5,
@@ -477,18 +544,75 @@ class TrainingSummary:
         )
         ax.plot(
             x,
-            y_init_openff,
-            label=lbl_off,
-            color="blue",
-            linestyle="--",
+            data["energy_pred_final"],
+            label=f"{lbl_final} (RMSE={_e_rmse('energy_pred_final')})",
+            color="red",
             linewidth=1.5,
-            zorder=1,
+            zorder=2,
         )
         ax.set_ylabel("Energy [kcal/mol]")
         ax.set_xlabel("Scale Factor")
         if y_lim is not None:
             ax.set_ylim(y_lim)
-        ax.legend(fontsize="small")
+        ax.legend(fontsize="small", loc="upper left")
+        ax.grid(alpha=0.3)
+        fig.tight_layout()
+
+        return _plot_to_base64_img(fig, width=plot_size[0], height=plot_size[1])
+
+    def _render_force_scatter(
+        self,
+        data: dict[str, np.ndarray],
+        plot_size: tuple[int, int],
+    ) -> str:
+        """Render an atomic force scatter plot as a base64 ``<img>`` tag."""
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        lbl_pre, lbl_pert, lbl_final = self._labels
+        f_ref = data["forces_ref"]
+        alpha = min(0.3, max(0.05, 500 / max(len(f_ref), 1)))
+
+        def _f_rmse(key: str) -> str:
+            return f"{np.sqrt(np.mean((data[key] - f_ref) ** 2)):.2e}"
+
+        fig, ax = plt.subplots(figsize=(plot_size[0] / 100, plot_size[1] / 100))
+        ax.scatter(
+            f_ref,
+            data["forces_pred_pre"],
+            label=f"{lbl_pre} (RMSE={_f_rmse('forces_pred_pre')})",
+            color="blue",
+            s=2,
+            alpha=alpha,
+            rasterized=True,
+        )
+        ax.scatter(
+            f_ref,
+            data["forces_pred_pert"],
+            label=f"{lbl_pert} (RMSE={_f_rmse('forces_pred_pert')})",
+            color="gray",
+            s=2,
+            alpha=alpha,
+            rasterized=True,
+        )
+        ax.scatter(
+            f_ref,
+            data["forces_pred_final"],
+            label=f"{lbl_final} (RMSE={_f_rmse('forces_pred_final')})",
+            color="red",
+            s=2,
+            alpha=alpha,
+            rasterized=True,
+        )
+        lim = float(np.percentile(np.abs(f_ref), 99)) * 1.1
+        ax.plot([-lim, lim], [-lim, lim], "k--", linewidth=0.8, label="y = x")
+        ax.set_xlim(-lim, lim)
+        ax.set_ylim(-lim, lim)
+        ax.set_xlabel("Force Ref [kcal/mol/\u00c5]")
+        ax.set_ylabel("Force Pred [kcal/mol/\u00c5]")
+        ax.legend(fontsize="small", loc="upper left")
         ax.grid(alpha=0.3)
         fig.tight_layout()
 
@@ -503,7 +627,7 @@ class TrainingSummary:
         y_lim: tuple[float, float] | None = (-30, 30),
     ) -> pd.DataFrame:
         """
-        Build a summary DataFrame with per-mixture plots and metrics.
+        Build a summary DataFrame with per-mixture energy and force plots.
 
         Parameters
         ----------
@@ -515,7 +639,7 @@ class TrainingSummary:
         mol_img_size : tuple[int, int]
             Width and height of molecule images in pixels.
         plot_size : tuple[int, int]
-            Width and height of the inline energy plot in pixels.
+            Width and height of the inline plots in pixels.
         y_lim : tuple[float, float] | None
             Y-axis limits for energy plots.  *None* for auto-scaling.
 
@@ -523,7 +647,7 @@ class TrainingSummary:
         -------
         pd.DataFrame
             Summary table with columns for mixture info, molecule image,
-            energy plot, and error metrics.
+            energy plot, force scatter plot, and error metrics.
         """
         ff = None
         if forcefield_path is not None:
@@ -531,65 +655,56 @@ class TrainingSummary:
 
             ff = ForceField(forcefield_path, load_plugins=True)
 
-        num_samples = len(self._predictions.mask_idxs)
-        offset_ptr = 0
+        # Build metadata lookup keyed by mixture_id
+        meta_lookup: dict = {}
+        if self._meta_df is not None:
+            meta_df = self._meta_df.copy()
+            if "mixture_id" in meta_df.columns:
+                meta_df = meta_df.drop_duplicates(subset="mixture_id").set_index(
+                    "mixture_id"
+                )
+            elif meta_df.index.duplicated().any():
+                meta_df = meta_df[~meta_df.index.duplicated(keep="first")]
+            meta_lookup = meta_df.to_dict("index")
+
         rows: list[dict] = []
+        for mix_id in self._get_mixture_ids():
+            data = self._extract_sample(mix_id)
+            metrics = self._compute_metrics(data)
 
-        for i in range(num_samples):
-            x, y_ref, y_pred, y_init, y_init_off, offset_ptr = self._extract_sample(
-                i, offset_ptr
-            )
-            metrics = self._compute_sample_metrics(y_ref, y_pred, y_init, y_init_off)
+            meta = meta_lookup.get(mix_id, {})
+            comp1 = meta.get("Component 1", "")
+            comp2 = meta.get("Component 2", "")
+            x1 = meta.get("Mole Fraction 1", None)
+            x2 = meta.get("Mole Fraction 2", None)
+            entry_id = meta.get("Id", mix_id)
 
-            entry = self._df.iloc[i]
-            entry_id = entry.get("Id", i)
-            comp1 = entry.get("Component 1", "")
-            comp2 = entry.get("Component 2", "")
-            x1 = entry.get("Mole Fraction 1", None)
-            x2 = entry.get("Mole Fraction 2", None)
-
-            # Molecule images
+            # Molecule column: image + SMILES + mole fraction per component
             mol_html = ""
-            if ff is not None:
+            if comp1 or comp2:
                 components = [(comp1, x1, "Comp 1"), (comp2, x2, "Comp 2")]
-                images: list[str] = []
+                parts: list[str] = []
                 for smi, xfrac, label in components:
                     if pd.notna(smi) and smi:
-                        xfrac_str = f" (x={xfrac:.4f})" if pd.notna(xfrac) else ""
+                        xfrac_str = f"x = {xfrac:.4f}" if pd.notna(xfrac) else ""
                         img_tag = _smiles_to_labeled_image(
                             str(smi),
-                            ff,
+                            ff=ff,
                             handler_key=handler_key,
                             img_size=mol_img_size,
                         )
-                        images.append(f"<b>{label}{xfrac_str}</b><br>{img_tag}")
-                mol_html = "<br>".join(images)
-
-            # Mole fractions string
-            frac_parts: list[str] = []
-            if pd.notna(x1):
-                frac_parts.append(f"{x1:.4f}")
-            if pd.notna(x2):
-                frac_parts.append(f"{x2:.4f}")
-            fractions = " / ".join(frac_parts)
-
-            # Inline plot
-            plot_html = self._render_plot(
-                x,
-                y_ref,
-                y_pred,
-                y_init,
-                y_init_off,
-                plot_size=plot_size,
-                y_lim=y_lim,
-            )
+                        header = f"<b>{label}</b>"
+                        if xfrac_str:
+                            header += f" ({xfrac_str})"
+                        parts.append(f"{header}<br><code>{smi}</code><br>{img_tag}")
+                mol_html = "<br>".join(parts)
 
             row: dict = {
-                "Run": f"run_{i:04d}",
+                "Run": mix_id,
                 "ID": entry_id,
-                "Mole Fractions": fractions,
                 "Molecule": mol_html,
-                "Energy Plot": plot_html,
+                "Energy Plot": self._render_energy_plot(data, plot_size, y_lim),
+                "Force Plot": self._render_force_scatter(data, plot_size),
             }
             row.update(metrics)
             rows.append(row)
@@ -622,8 +737,8 @@ class TrainingSummary:
         import panel
 
         number_fmt = bokeh.models.widgets.tables.NumberFormatter(format="0.0000")
-        html_cols = {"Molecule", "Energy Plot"}
-        string_cols = {"Run", "ID", "Mole Fractions"}
+        html_cols = {"Molecule", "Energy Plot", "Force Plot"}
+        string_cols = {"Run", "ID"}
 
         formatters: dict = {}
         for col in summary_df.columns:
@@ -643,6 +758,9 @@ class TrainingSummary:
         row_height = max(380, 340 * max(1, max_imgs))
         n_rows = page_size if page_size is not None else max(3, 1500 // row_height)
 
+        ncols = len(summary_df.columns)
+        table_width = max(1800, 300 * ncols)
+
         tabulator = panel.widgets.Tabulator(
             summary_df,
             show_index=False,
@@ -650,8 +768,9 @@ class TrainingSummary:
             disabled=True,
             formatters=formatters,
             configuration={"rowHeight": row_height},
-            sizing_mode="stretch_width",
-            frozen_columns=["Run", "ID", "Mole Fractions"],
+            sizing_mode="fixed",
+            width=table_width,
+            frozen_columns=["Run", "ID"],
             page_size=n_rows,
             pagination="local",
         )
@@ -659,13 +778,18 @@ class TrainingSummary:
         css = (
             ".tabulator-cell { overflow: visible !important; }"
             ".tabulator-row { overflow: visible !important; }"
-            ".tabulator { overflow-x: auto !important; }"
         )
 
         layout = panel.Column(
             panel.pane.HTML(f"<style>{css}</style>"),
             panel.pane.Markdown(f"# {title}"),
             tabulator,
+            sizing_mode="fixed",
+            width=table_width,
         )
-        layout.save(str(output_file), title=title, embed=True)
+
+        out = str(output_file)
+        layout.save(out, title=title, embed=True)
+
+        _patch_html_scroll(Path(out))
         print(f"Summary saved to {output_file}")
