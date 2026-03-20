@@ -1,22 +1,25 @@
-"""File I/O utilities — pickle serialisation and force field export."""
+"""File I/O utilities."""
 
 import copy
-import pickle as pkl
+import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-if TYPE_CHECKING:
-    import smee
-    from openff.toolkit import ForceField
+import datasets
+import pandas as pd
+import smee
+import torch
+from openff.toolkit import ForceField
 
 
-def load_pickle(file_path: Path | str) -> Any:
-    """Load an object from a pickle file.
+def load_object(file_path: Path | str) -> Any:
+    """
+    Load an object serialised with :func:`save_object` (via ``torch.load``).
 
     Parameters
     ----------
     file_path : Path | str
-        Path to the pickle file.
+        Path to the serialised file (``.pt``).
 
     Returns
     -------
@@ -26,49 +29,169 @@ def load_pickle(file_path: Path | str) -> Any:
     Raises
     ------
     FileNotFoundError
-        If the pickle file does not exist.
-
-    Examples
-    --------
-    >>> data = load_pickle("output/system.pkl")
+        If the file does not exist.
     """
     file = Path(file_path)
     if not file.exists():
-        raise FileNotFoundError(f"Pickle file not found: {file}")
+        raise FileNotFoundError(f"File not found: {file}")
 
-    with open(file_path, "rb") as f:
-        return pkl.load(f)
+    return torch.load(file, weights_only=False, map_location="cpu")
 
 
-def save_pickle(obj: Any, file_path: Path | str) -> None:
-    """Save an object to a pickle file.
-
-    Creates parent directories if they don't exist.
+def save_object(obj: Any, file_path: Path | str) -> None:
+    """
+    Save an arbitrary object using ``torch.save``.
 
     Parameters
     ----------
     obj : Any
         The object to save.
     file_path : Path | str
-        Path for the output pickle file.
-
-    Examples
-    --------
-    >>> save_pickle({"data": [1, 2, 3]}, "output/data.pkl")
+        Path for the output file (``.pt``).
     """
     file_path = Path(file_path)
     file_path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(obj, file_path)
 
-    with open(file_path, "wb") as f:
-        pkl.dump(obj, f)
+
+# Backward-compatible aliases
+load_pickle = load_object
+save_pickle = save_object
+
+
+def save_dataset(dataset: datasets.Dataset, path: Path | str) -> None:
+    """
+    Save a HuggingFace ``Dataset`` to disk as Arrow IPC files.
+
+    Parameters
+    ----------
+    dataset : datasets.Dataset
+        The dataset to persist.
+    path : Path | str
+        Directory where the Arrow files will be written.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    dataset.save_to_disk(str(path))
+
+
+def load_dataset(path: Path | str) -> datasets.Dataset:
+    """
+    Load a HuggingFace ``Dataset`` previously saved with :func:`save_dataset`.
+
+    Parameters
+    ----------
+    path : Path | str
+        Directory containing the Arrow IPC files.
+
+    Returns
+    -------
+    datasets.Dataset
+
+    Raises
+    ------
+    FileNotFoundError
+        If *path* does not exist.
+    """
+    import datasets as _datasets
+
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f"Dataset directory not found: {path}")
+    return _datasets.Dataset.load_from_disk(str(path))
+
+
+def save_parquet(df: pd.DataFrame, file_path: Path | str) -> None:
+    """
+    Write a pandas DataFrame to a Parquet file.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Data to write.
+    file_path : Path | str
+        Output ``.parquet`` path.
+    """
+    file_path = Path(file_path)
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    df.to_parquet(file_path, index=False)
+
+
+def load_parquet(file_path: Path | str) -> pd.DataFrame:
+    """
+    Read a Parquet file into a pandas DataFrame.
+
+    Parameters
+    ----------
+    file_path : Path | str
+        Path to the ``.parquet`` file.
+
+    Returns
+    -------
+    pd.DataFrame
+
+    Raises
+    ------
+    FileNotFoundError
+        If the file does not exist.
+    """
+    import pandas as _pd
+
+    file_path = Path(file_path)
+    if not file_path.exists():
+        raise FileNotFoundError(f"Parquet file not found: {file_path}")
+    return _pd.read_parquet(file_path)
+
+
+def save_json(obj: Any, file_path: Path | str) -> None:
+    """
+    Write a JSON-serialisable object to a file.
+
+    Parameters
+    ----------
+    obj : Any
+        Must be JSON-serialisable.
+    file_path : Path | str
+        Output ``.json`` path.
+    """
+    file_path = Path(file_path)
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(file_path, "w") as f:
+        json.dump(obj, f, indent=2)
+
+
+def load_json(file_path: Path | str) -> Any:
+    """
+    Read a JSON file.
+
+    Parameters
+    ----------
+    file_path : Path | str
+        Path to the ``.json`` file.
+
+    Returns
+    -------
+    Any
+
+    Raises
+    ------
+    FileNotFoundError
+        If the file does not exist.
+    """
+    file_path = Path(file_path)
+    if not file_path.exists():
+        raise FileNotFoundError(f"JSON file not found: {file_path}")
+    with open(file_path) as f:
+        return json.load(f)
 
 
 def export_forcefield_to_offxml(
-    base_forcefield: "ForceField",
-    tensor_forcefield: "smee.TensorForceField",
+    base_forcefield: ForceField,
+    tensor_forcefield: smee.TensorForceField,
     output_path: Path | str,
-) -> "ForceField":
-    """Export tensor force field parameters to OpenFF XML format.
+) -> ForceField:
+    """
+    Export tensor force field parameters to OpenFF XML format.
 
     Updates a base OpenFF ForceField with parameters from a tensor-based
     force field and saves to an OFFXML file.
@@ -131,4 +254,3 @@ def export_forcefield_to_offxml(
     forcefield.to_file(str(output_path))
 
     return forcefield
-
