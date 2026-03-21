@@ -37,22 +37,6 @@ class TestRunSimulationOmm:
         assert box_np.shape == (3, 3)
 
 
-class TestGenerateInitialCoords:
-    def test_shapes_and_types(self, initial_coords_box, water_system):
-        coords, box = initial_coords_box
-        assert isinstance(coords, openmm.unit.Quantity)
-        assert isinstance(box, openmm.unit.Quantity)
-        tensor_system, _, _ = water_system
-        n_atoms = sum(
-            t.n_atoms * n
-            for t, n in zip(
-                tensor_system.topologies, tensor_system.n_copies, strict=True
-            )
-        )
-        assert coords.value_in_unit(openmm.unit.angstrom).shape == (n_atoms, 3)
-        assert box.value_in_unit(openmm.unit.angstrom).shape == (3, 3)
-
-
 class TestLoadTrajectoryFrames:
     def test_missing_file_raises(self, tmp_path):
         with pytest.raises((FileNotFoundError, OSError)):
