@@ -11,15 +11,12 @@ git clone https://github.com/JMorado/SCALeJ.git
 cd SCALeJ
 ```
 
-Create a conda environment with all the required dependencies:
+Install SCALeJ using pixi:
 
 ```bash
-conda env create -f environment.yaml
-conda activate scalej
+pixi shell
 ```
 
-Install SCALeJ in development mode:
+## Usage
 
-```bash
-pip install -e .
-```
+Currently, SCALeJ is a work in progress and only the API is provided. A CLI and Snakemake pipeline will be provided in the future.

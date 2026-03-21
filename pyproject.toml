@@ -7,51 +7,19 @@ name = "SCALeJ"
 version = "0.1.0"
 description = "SCALeJ: Lennard-Jones Parameter Fitting via Condensed-Phase Volume-Scaling."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [
-    {name = "SCALeJ Contributors"}
+    {name = "João Morado", email = "joaomorado@gmail.com"}
 ]
 keywords = ["molecular dynamics", "machine learning", "force field", "Lennard-Jones", "fitting"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Chemistry",
     "Topic :: Scientific/Engineering :: Physics",
 ]
-
-dependencies = [
-    "torch>=2.0.0",
-    "numpy>=1.20.0",
-    "pydantic>=2.0.0",
-#    "pydantic-units>=0.1.0",
-    "tqdm>=4.60.0",
-    "pyyaml>=6.0",
-    "openmm>=8.0.0",
-    "openff-toolkit>=0.14.0",
-    "smee>=0.1.0",
-    "datasets>=2.0.0",
-    "pyarrow>=10.0.0",
-]
-
-[project.optional-dependencies]
-dev = [
-    "pytest>=7.0.0",
-    "pytest-cov>=4.0.0",
-    "pytest-mock>=3.10.0",
-    "black>=22.0.0",
-    "isort>=5.10.0",
-    "mypy>=0.950",
-    "ruff>=0.1.0",
-]
-
-[project.scripts]
-scalej = "scalej.cli.main:main"
 
 [project.urls]
 Homepage = "https://github.com/JMorado/scalej"
@@ -62,28 +30,22 @@ where = ["."]
 include = ["scalej*"]
 exclude = ["examples*", "tests*"]
 
-[tool.black]
-line-length = 88
-target-version = ['py39', 'py310', 'py311', 'py312']
-
-[tool.isort]
-profile = "black"
-line_length = 88
-
 [tool.ruff]
 line-length = 88
-target-version = "py39"
+target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "N", "UP"]
-ignore = []
+ignore = ["C901", "E501"]
+select = ["B","C","E","F","W","B9"]
+ignore-init-module-imports = true
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
 
 [tool.pytest.ini_options]
 minversion = "7.0"
 testpaths = ["tests"]
-python_files = ["test_*.py"]
-python_classes = ["Test*"]
-python_functions = ["test_*"]
 addopts = [
     "-v",
     "--strict-markers",
@@ -96,3 +58,116 @@ markers = [
     "integration: Integration tests",
     "slow: Slow tests that may take significant time",
 ]
+
+[tool.coverage.report]
+exclude_lines = [
+  "@overload",
+  "pragma: no cover",
+  "raise NotImplementedError",
+  "if __name__ == .__main__.:",
+  "if TYPE_CHECKING:",
+  "if typing.TYPE_CHECKING:",
+]
+
+# ----------------------------------------- #
+#               Pixi                      #
+# ----------------------------------------- #
+[tool.pixi.workspace]
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+name = "scalej"
+preview = ["pixi-build"]
+
+[tool.pixi.package]
+name = {workspace = true}
+
+[tool.pixi.package.build-dependencies]
+python = ">=3.11,<3.15"
+
+[tool.pixi.package.host-dependencies]
+hatchling = "*"
+
+[tool.pixi.package.build.backend]
+name = "pixi-build-python"
+version = "*"
+channels = ["https://prefix.dev/conda-forge"]
+
+[tool.pixi.environments]
+default = { features = ["py312", "mm", "data", "viz", "examples", "dev"]}
+ci-cpu-py311 = { features = ["py311", "mm", "data", "dev"]}
+ci-cpu-py312 = { features = ["py312", "mm", "data", "dev"]}
+ci-cpu-py313 = { features = ["py313", "mm", "data", "dev"]}
+gpu-cu12-py311 = { features = ["py311", "cu12", "mm", "data", "viz", "dev"]}
+gpu-cu12-py312 = { features = ["py312", "cu12", "mm", "data", "viz", "dev"]}
+gpu-cu12-py313 = { features = ["py313", "cu12", "mm", "data", "viz", "dev"]}
+
+
+[tool.pixi.dependencies]
+python = ">=3.11"
+pytorch = "*"
+numpy = "*"
+pydantic = ">=2.0"
+tqdm = "*"
+pyyaml = "*"
+loguru = "*"
+pydantic-units = "*"
+
+[tool.pixi.pypi-dependencies]
+scalej = { path = ".", editable = true }
+smee = { git = "https://github.com/openforcefield/smee.git" }
+descent = { git = "https://github.com/openforcefield/descent.git" }
+
+[tool.pixi.feature.cu12]
+platforms = ["linux-64"]
+
+[tool.pixi.feature.cu12.system-requirements]
+cuda = "12"
+
+[tool.pixi.feature.cu12.dependencies]
+cuda-version = "12.*"
+pytorch-gpu = "*"
+
+[tool.pixi.feature.mm.dependencies]
+openmm = "*"
+openmm-ml = "*"
+openff-toolkit = ">=0.14.0"
+rdkit = "*"
+ase = "*"
+nnpops = "*"
+
+[tool.pixi.feature.data.dependencies]
+datasets = "*"
+pandas = "*"
+pyarrow = "*"
+
+[tool.pixi.feature.viz.dependencies]
+matplotlib = "*"
+bokeh = "*"
+panel = "*"
+
+[tool.pixi.feature.examples.dependencies]
+jupyter = "*"
+nbconvert = "*"
+
+[tool.pixi.feature.dev.dependencies]
+pytest = "*"
+pytest-cov = "*"
+pytest-mock = "*"
+mypy = "*"
+ruff = "*"
+pre-commit = "*"
+
+[tool.pixi.feature.py311.dependencies]
+python = "3.11.*"
+
+[tool.pixi.feature.py312.dependencies]
+python = "3.12.*"
+
+[tool.pixi.feature.py313.dependencies]
+python = "3.13.*"
+
+[tool.pixi.tasks]
+lint = "ruff check scalej"
+format = "ruff format scalej && ruff check --fix --select I scalej"
+test = "pytest -v --cov=scalej --cov-report=term-missing --cov-report=xml"
+typecheck = "mypy scalej"

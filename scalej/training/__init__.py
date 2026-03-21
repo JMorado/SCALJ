@@ -6,13 +6,13 @@ from ._predict import predict_energies_forces
 from ._train import train_from_closure, train_parameters
 from ._trainable import create_trainable
 from ._types import (
-                     BatchResult,
-                     ConformerWeights,
-                     EntryData,
-                     LossConfig,
-                     ReferenceMode,
-                     ReferenceOffsetGradient,
-                     WeightingMethod,
+    BatchResult,
+    ConformerWeights,
+    EntryData,
+    LossConfig,
+    ReferenceMode,
+    ReferenceOffsetGradient,
+    WeightingMethod,
 )
 
 __all__ = [
