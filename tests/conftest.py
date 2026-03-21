@@ -1,4 +1,4 @@
-"""Shared fixtures and constants for data tests."""
+"""Shared fixtures and constants for all tests."""
 
 import numpy as np
 import pytest
@@ -42,3 +42,39 @@ def water_dimer_coords_multiframe():
 def water_dimer_box_multiframe():
     """Two box vectors for a two-frame trajectory."""
     return np.stack([BOX, BOX * 1.01], axis=0)
+
+
+@pytest.fixture(scope="module")
+def water_system():
+    """TensorSystem, TensorForceField, and topologies for a water dimer."""
+    from scalej.simulation._systems import create_system_from_smiles
+
+    tensor_system, tensor_forcefield, topologies = create_system_from_smiles(
+        smiles_list=["O"],
+        nmol_list=[2],
+    )
+    return tensor_system, tensor_forcefield, topologies
+
+
+@pytest.fixture(scope="module")
+def water_methane_system():
+    """TensorSystem, TensorForceField, and topologies for water + methane."""
+    from scalej.simulation._systems import create_system_from_smiles
+
+    tensor_system, tensor_forcefield, topologies = create_system_from_smiles(
+        smiles_list=["O", "C"],
+        nmol_list=[2, 3],
+    )
+    return tensor_system, tensor_forcefield, topologies
+
+
+@pytest.fixture(scope="module")
+def composite_system():
+    """Composite system from two named components (water + methane)."""
+    from scalej.simulation._systems import create_composite_system
+
+    config = [
+        {"name": "water", "components": [{"smiles": "O", "nmol": 2}]},
+        {"name": "methane", "components": [{"smiles": "C", "nmol": 3}]},
+    ]
+    return create_composite_system(config)
