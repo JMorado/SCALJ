@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "SCALeJ"
@@ -74,7 +74,7 @@ exclude_lines = [
 # ----------------------------------------- #
 [tool.pixi.workspace]
 channels = ["conda-forge"]
-platforms = ["linux-64"]
+platforms = ["linux-64", "osx-arm64"]
 name = "scalej"
 preview = ["pixi-build"]
 
@@ -93,14 +93,13 @@ version = "*"
 channels = ["https://prefix.dev/conda-forge"]
 
 [tool.pixi.environments]
-default = { features = ["py312", "mm", "data", "viz", "examples", "dev"]}
+default = { features = ["py312", "cu12", "mm", "data", "viz", "examples", "dev"]}
 ci-cpu-py311 = { features = ["py311", "mm", "data", "dev"]}
 ci-cpu-py312 = { features = ["py312", "mm", "data", "dev"]}
 ci-cpu-py313 = { features = ["py313", "mm", "data", "dev"]}
 gpu-cu12-py311 = { features = ["py311", "cu12", "mm", "data", "viz", "dev"]}
 gpu-cu12-py312 = { features = ["py312", "cu12", "mm", "data", "viz", "dev"]}
 gpu-cu12-py313 = { features = ["py313", "cu12", "mm", "data", "viz", "dev"]}
-
 
 [tool.pixi.dependencies]
 python = ">=3.11"
@@ -131,6 +130,8 @@ pytorch-gpu = "*"
 openmm = "*"
 openmm-ml = "*"
 openff-toolkit = ">=0.14.0"
+smirnoff-plugins = "*"
+de-forcefields = "*"
 rdkit = "*"
 ase = "*"
 nnpops = "*"
