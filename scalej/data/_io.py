@@ -26,11 +26,6 @@ def load_object(file_path: Path | str) -> Any:
     -------
     Any
         The loaded object.
-
-    Raises
-    ------
-    FileNotFoundError
-        If the file does not exist.
     """
     file = Path(file_path)
     if not file.exists():
@@ -100,11 +95,6 @@ def load_dataset(path: Path | str) -> datasets.Dataset:
     Returns
     -------
     datasets.Dataset
-
-    Raises
-    ------
-    FileNotFoundError
-        If *path* does not exist.
     """
     import datasets as _datasets
 
@@ -142,11 +132,6 @@ def load_parquet(file_path: Path | str) -> pd.DataFrame:
     Returns
     -------
     pd.DataFrame
-
-    Raises
-    ------
-    FileNotFoundError
-        If the file does not exist.
     """
     import pandas as _pd
 
@@ -185,11 +170,6 @@ def load_json(file_path: Path | str) -> Any:
     Returns
     -------
     Any
-
-    Raises
-    ------
-    FileNotFoundError
-        If the file does not exist.
     """
     file_path = Path(file_path)
     if not file_path.exists():
@@ -222,17 +202,6 @@ def export_forcefield_to_offxml(
     -------
     ForceField
         The updated OpenFF force field.
-
-    Notes
-    -----
-    Currently only supports updating vdW parameters (epsilon, sigma)
-    for Lennard-Jones or Double Exponential potentials.
-
-    Examples
-    --------
-    >>> updated_ff = export_forcefield_to_offxml(
-    ...     original_ff, trained_tensor_ff, "optimized.offxml"
-    ... )
     """
     from openff.units import unit as offunit
 
