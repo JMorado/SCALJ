@@ -1,13 +1,17 @@
 """Evaluation functions for force field assessment."""
 
+import logging
 from pathlib import Path
 from typing import Any
 
 import datasets
 import numpy as np
+import pandas as pd
 import smee
 
 from ..models import BenchmarkResult, EvaluationMetrics, PredictionResult
+
+log = logging.getLogger(__name__)
 
 
 def compute_metrics(
@@ -324,3 +328,91 @@ def evaluate_force_field(
     metrics = compute_metrics(prediction)
 
     return prediction, metrics
+
+
+def save_evaluation_parquets(
+    prediction: PredictionResult,
+    dataset: datasets.Dataset,
+    raw_df: pd.DataFrame,
+    output_dir: Path,
+    tag: str,
+) -> None:
+    """Save per-conformer energy and force predictions to a parquet file.
+
+    One row per conformer. Forces are stored as flat lists of length
+    ``n_atoms * 3``; reshape with ``.reshape(n_atoms, 3)`` after loading.
+
+    Parameters
+    ----------
+    prediction : PredictionResult
+        Output of ``evaluate_force_field`` or ``predict_energies_forces``.
+    dataset : datasets.Dataset
+        HuggingFace dataset used for evaluation (same order as prediction).
+    raw_df : pd.DataFrame
+        Original combined_data DataFrame; used to look up ``scale_factors``.
+    output_dir : Path
+        Directory where the parquet file is written.
+    tag : str
+        Prefix used to name the output file (e.g. ``"initial"`` or ``"final"``).
+    """
+    from ..data import save_parquet
+
+    scale_factor_map: dict[str, list[float]] = {
+        mid: group["scale_factors"].tolist()
+        for mid, group in raw_df.groupby("mixture_id", sort=False)
+    }
+
+    rows = []
+    energy_offset = 0
+    forces_offset = 0
+
+    e_ref_np = prediction.energy_ref.detach().cpu().numpy()
+    e_pred_np = prediction.energy_pred.detach().cpu().numpy()
+    f_ref_np = prediction.forces_ref.detach().cpu().numpy()
+    f_pred_np = prediction.forces_pred.detach().cpu().numpy()
+
+    for i, entry in enumerate(dataset):
+        mixture_id = entry["mixture_id"]
+        mask_idxs = prediction.mask_idxs[i]
+        n_conf_filtered = len(mask_idxs)
+
+        if n_conf_filtered == 0:
+            continue
+
+        n_conf_raw = len(entry["energy"])
+        n_atoms = len(entry["forces"]) // (n_conf_raw * 3)
+        scale_factors = scale_factor_map.get(mixture_id, [])
+
+        e_ref = e_ref_np[energy_offset : energy_offset + n_conf_filtered]
+        e_pred = e_pred_np[energy_offset : energy_offset + n_conf_filtered]
+
+        n_force_rows = n_conf_filtered * n_atoms
+        f_ref = f_ref_np[forces_offset : forces_offset + n_force_rows].reshape(
+            n_conf_filtered, n_atoms, 3
+        )
+        f_pred = f_pred_np[forces_offset : forces_offset + n_force_rows].reshape(
+            n_conf_filtered, n_atoms, 3
+        )
+
+        for j in range(n_conf_filtered):
+            conf_idx = int(mask_idxs[j].item())
+            rows.append(
+                {
+                    "mixture_id": mixture_id,
+                    "conformer_idx": conf_idx,
+                    "scale_factor": (
+                        scale_factors[conf_idx] if scale_factors else None
+                    ),
+                    "energy_ref": float(e_ref[j]),
+                    "energy_pred": float(e_pred[j]),
+                    "forces_ref": f_ref[j].flatten().tolist(),
+                    "forces_pred": f_pred[j].flatten().tolist(),
+                }
+            )
+
+        energy_offset += n_conf_filtered
+        forces_offset += n_force_rows
+
+    out_path = output_dir / f"{tag}_evaluations.parquet"
+    save_parquet(pd.DataFrame(rows), out_path)
+    log.info(f"Saved {tag} evaluations -> '{out_path}'")

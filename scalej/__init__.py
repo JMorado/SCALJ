@@ -39,6 +39,7 @@ from .analysis import (
     plot_parity,
     plot_training_losses,
     run_thermo_benchmark,
+    save_evaluation_parquets,
 )
 
 # Data functions
@@ -149,6 +150,7 @@ __all__ = [
     "plot_energy_vs_scale",
     "plot_parity",
     "plot_training_losses",
+    "save_evaluation_parquets",
     # Systems
     "create_system_from_smiles",
     "create_composite_system",

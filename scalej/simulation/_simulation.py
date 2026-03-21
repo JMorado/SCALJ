@@ -25,7 +25,8 @@ def run_md_simulation(
     report_interval: int = 1000,
     save_pdb: bool = True,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Run classical MD simulation with equilibration and production phases.
+    """
+    Run classical MD simulation with equilibration and production phases.
 
     Performs energy minimization, NVT equilibration, NPT equilibration,
     and production dynamics, saving trajectory frames to a DCD file.
