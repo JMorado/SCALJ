@@ -6,10 +6,9 @@ import numpy as np
 import pyarrow
 import torch
 
-# Define dataset schema for energy/force data
 DATA_SCHEMA = pyarrow.schema(
     [
-        ("mixture_id", pyarrow.string()),
+        ("id", pyarrow.string()),
         ("smiles", pyarrow.string()),
         ("coords", pyarrow.list_(pyarrow.float64())),
         ("box_vectors", pyarrow.list_(pyarrow.float64())),
@@ -20,7 +19,7 @@ DATA_SCHEMA = pyarrow.schema(
 
 
 def create_dataset_entry(
-    mixture_id: str,
+    id: str,
     smiles: str,
     coords_list: list[np.ndarray],
     box_vectors_list: list[np.ndarray],
@@ -32,7 +31,7 @@ def create_dataset_entry(
 
     Parameters
     ----------
-    mixture_id : str
+    id : str
         Unique identifier for this mixture/system.
     smiles : str
         SMILES string (dot-separated for mixtures).
@@ -56,7 +55,7 @@ def create_dataset_entry(
     all_forces = []
 
     for coord, box_vec, energy, force in zip(
-        coords_list, box_vectors_list, energies, forces
+        coords_list, box_vectors_list, energies, forces, strict=True
     ):
         if not isinstance(coord, np.ndarray):
             coord = np.asarray(coord)
@@ -69,7 +68,7 @@ def create_dataset_entry(
         all_forces.extend(force.flatten().tolist())
 
     return {
-        "mixture_id": mixture_id,
+        "id": id,
         "smiles": smiles,
         "coords": all_coords,
         "box_vectors": all_box_vectors,
@@ -91,16 +90,11 @@ def create_dataset(entries: list[dict]) -> datasets.Dataset:
     -------
     datasets.Dataset
         HuggingFace dataset with torch format.
-
-    Examples
-    --------
-    >>> entry = create_dataset_entry("ethanol", "CCO", coords, boxes, E, F)
-    >>> dataset = create_dataset([entry])
     """
     table = pyarrow.Table.from_pylist(
         [
             {
-                "mixture_id": entry["mixture_id"],
+                "id": entry["id"],
                 "smiles": entry["smiles"],
                 "coords": entry["coords"],
                 "box_vectors": entry["box_vectors"],
@@ -121,42 +115,32 @@ def combine_datasets(
     mixture_datasets: dict[str, datasets.Dataset],
 ) -> datasets.Dataset:
     """
-    Combine multiple mixture datasets into a single dataset.
+    Combine multiple datasets into a single dataset.
 
     Parameters
     ----------
-    mixture_datasets : dict[str, datasets.Dataset]
-        Dictionary mapping mixture IDs to their datasets.
+    datasets : dict[str, datasets.Dataset]
+        Dictionary mapping IDs to their datasets.
 
     Returns
     -------
     datasets.Dataset
         Combined dataset with torch format.
-
-    Examples
-    --------
-    >>> combined = combine_datasets({
-    ...     "ethanol": ethanol_dataset,
-    ...     "water": water_dataset,
-    ... })
     """
+    # Gather all entries from the individual datasets.
     all_entries = []
-
-    for mixture_id, ds in mixture_datasets.items():
+    for ds in mixture_datasets.values():
         for entry in ds:
             entry_dict = dict(entry)
-            if "mixture_id" not in entry_dict or entry_dict["mixture_id"] is None:
-                entry_dict["mixture_id"] = mixture_id
             all_entries.append(entry_dict)
 
-    # Ensure tensors are converted to lists for PyArrow
+    # Ensure tensors are converted to lists for PyArrow.
     for entry in all_entries:
-        if isinstance(entry["coords"], torch.Tensor):
-            entry["coords"] = entry["coords"].flatten().tolist()
-        if isinstance(entry["forces"], torch.Tensor):
-            entry["forces"] = entry["forces"].flatten().tolist()
+        for key in ("coords", "forces", "box_vectors", "energy"):
+            if isinstance(entry[key], torch.Tensor):
+                entry[key] = entry[key].flatten().tolist()
 
-    # Create combined dataset
+    # Create combined dataset.
     table = pyarrow.Table.from_pylist(all_entries, schema=DATA_SCHEMA)
     combined = datasets.Dataset(datasets.table.InMemoryTable(table))
     combined.set_format("torch")

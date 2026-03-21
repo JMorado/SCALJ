@@ -27,14 +27,6 @@ def generate_scale_factors(
     -------
     np.ndarray
         Array of scale factors spanning all regions.
-
-    Examples
-    --------
-    >>> scales = generate_scale_factors()
-    >>> scales.shape
-    (30,)
-    >>> scales[0]  # Close range starts at 0.75
-    0.75
     """
     close = np.linspace(*close_range)
     equilibrium = np.linspace(*equilibrium_range)
@@ -48,7 +40,7 @@ def compute_molecule_coms(
     n_atoms_per_mol: int,
 ) -> np.ndarray:
     """
-    Compute center of mass for each molecule.
+    Compute center of mass for each molecule assuming uniform atomic masses.
 
     Parameters
     ----------
@@ -61,11 +53,6 @@ def compute_molecule_coms(
     -------
     np.ndarray
         Centers of mass with shape (n_molecules, 3) or (n_frames, n_molecules, 3).
-
-    Raises
-    ------
-    ValueError
-        If coords has unexpected shape.
     """
     if coords.ndim == 2:
         n_atoms = coords.shape[0]
@@ -86,6 +73,10 @@ def get_box_center(box_vectors: np.ndarray) -> np.ndarray:
     """
     Compute the center of the simulation box.
 
+    Notes
+    -----
+    Assumes the box is orthorhombic (i.e., box vectors are diagonal).
+
     Parameters
     ----------
     box_vectors : np.ndarray
@@ -95,11 +86,6 @@ def get_box_center(box_vectors: np.ndarray) -> np.ndarray:
     -------
     np.ndarray
         Box center with shape (3,) or (n_frames, 3).
-
-    Raises
-    ------
-    ValueError
-        If box_vectors has unexpected shape.
     """
     if box_vectors.ndim == 2:
         center = 0.5 * np.diag(box_vectors)
@@ -116,10 +102,8 @@ def scale_molecule_positions(
     n_atoms_per_mol: int,
     scale_factor: float,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Scale molecular positions rigidly around the box center.
-
-    Scales molecular center-of-mass positions while preserving internal
-    molecular geometry. The box vectors are also scaled by the same factor.
+    """
+    Scale molecular positions rigidly around the box center.
 
     Parameters
     ----------
@@ -136,14 +120,6 @@ def scale_molecule_positions(
     -------
     tuple[np.ndarray, np.ndarray]
         Tuple of (scaled_coords, scaled_box_vectors).
-
-    Examples
-    --------
-    >>> coords = np.random.rand(100, 3)  # 100 atoms
-    >>> box = np.eye(3) * 30  # 30 Å cubic box
-    >>> scaled_coords, scaled_box = scale_molecule_positions(coords, box, 10, 0.9)
-    >>> scaled_box[0, 0]  # Box side is now 27 Å
-    27.0
     """
     single_frame = coords.ndim == 2
     if single_frame:
@@ -153,38 +129,36 @@ def scale_molecule_positions(
     n_frames, n_atoms = coords.shape[:2]
     n_molecules = n_atoms // n_atoms_per_mol
 
-    # Compute molecular centers of mass
+    # Compute COMs and box centers.
     coms = compute_molecule_coms(coords, n_atoms_per_mol)
-
-    # Get box centers
     box_centers = get_box_center(box_vectors)
 
-    # Compute displacement vectors from box center to each COM
+    # Compute displacement vectors from box center to each COM.
     displacements = coms - box_centers[:, np.newaxis, :]
 
-    # Scale displacements
+    # Scale displacements.
     scaled_displacements = displacements * scale_factor
 
-    # Compute new COMs
+    # Compute new COMs.
     new_coms = box_centers[:, np.newaxis, :] + scaled_displacements
 
-    # Compute translation vector for each molecule
+    # Compute translation vector for each molecule.
     translations = new_coms - coms
 
-    # Apply translations to all atoms in each molecule
+    # Apply translations to all atoms in each molecule.
     coords_reshaped = coords.reshape(n_frames, n_molecules, n_atoms_per_mol, 3)
     translations_expanded = translations[:, :, np.newaxis, :]
 
-    # Apply translation
+    # Apply translation.
     scaled_coords = coords_reshaped + translations_expanded
 
-    # Reshape back to original shape
+    # Reshape back to original shape.
     scaled_coords = scaled_coords.reshape(n_frames, n_atoms, 3)
 
-    # Scale box vectors
+    # Scale box vectors.
     scaled_box_vectors = box_vectors * scale_factor
 
-    # Remove batch dimension if input was single frame
+    # Remove batch dimension if input was single frame.
     if single_frame:
         scaled_coords = np.squeeze(scaled_coords, axis=0)
         scaled_box_vectors = np.squeeze(scaled_box_vectors, axis=0)
@@ -201,9 +175,6 @@ def create_scaled_configurations(
     """
     Create a dataset with multiple scaled versions of input configurations.
 
-    Generates scaled configurations by applying each scale factor to the
-    input coordinates, scaling molecular positions rigidly around the box center.
-
     Parameters
     ----------
     tensor_system : smee.TensorSystem
@@ -219,17 +190,6 @@ def create_scaled_configurations(
     -------
     ScalingResult
         Result containing scaled coordinates, box vectors, and scale factors.
-
-    Examples
-    --------
-    >>> import smee
-    >>> # Assuming you have a tensor_system
-    >>> coords = np.random.rand(100, 3) * 30
-    >>> box = np.eye(3) * 30
-    >>> scales = generate_scale_factors()
-    >>> result = create_scaled_configurations(tensor_system, coords, box, scales)
-    >>> len(result.coords)  # One configuration per scale factor
-    30
     """
     all_coords = []
     all_box_vectors = []
@@ -237,48 +197,43 @@ def create_scaled_configurations(
     for scale in scale_factors:
         scaled_slices = []
         current_idx = 0
-        final_scaled_box_vecs = None
 
-        for topology, n_copy in zip(tensor_system.topologies, tensor_system.n_copies):
+        for topology, n_copy in zip(
+            tensor_system.topologies, tensor_system.n_copies, strict=True
+        ):
+            # We assume that the copies of each molecule are contiguous in the coords array,
+            # so we can slice them out directly.
+            # TODO: Check if this is always guaranteed.
             n_atoms_per_mol = len(topology.atomic_nums)
-            n_atoms_total_species = n_atoms_per_mol * n_copy
+            total_n_atoms = n_atoms_per_mol * n_copy
 
-            # Slice coords for this species
             if coords.ndim == 2:
-                species_coords = coords[
-                    current_idx : current_idx + n_atoms_total_species
-                ]
+                species_coords = coords[current_idx : current_idx + total_n_atoms]
             else:
-                species_coords = coords[
-                    :, current_idx : current_idx + n_atoms_total_species, :
-                ]
+                species_coords = coords[:, current_idx : current_idx + total_n_atoms, :]
 
-            # Scale this block of molecules
+            # Scale this block of molecules.
             scaled_species_coords, scaled_box_vecs = scale_molecule_positions(
                 species_coords, box_vectors, n_atoms_per_mol, float(scale)
             )
 
             scaled_slices.append(scaled_species_coords)
-            current_idx += n_atoms_total_species
+            current_idx += total_n_atoms
 
-            # Keep the scaled box vectors (they are the same for all species)
-            final_scaled_box_vecs = scaled_box_vecs
-
-        # Concatenate all scaled species coordinates
+        # Concatenate all scaled species coordinates.
         if coords.ndim == 2:
             full_scaled_coords = np.concatenate(scaled_slices, axis=0)
             all_coords.append(full_scaled_coords)
-            all_box_vectors.append(final_scaled_box_vecs)
+            all_box_vectors.append(scaled_box_vecs)
         else:
-            # Multiple frames: concatenate species and flatten frames into list
+            # Multiple frames: concatenate species and flatten frames into list.
             full_scaled_coords = np.concatenate(scaled_slices, axis=1)
-            # full_scaled_coords has shape (n_frames, n_atoms, 3)
-            # Unpack each frame into a separate list element
+            # Unpack each frame into a separate list element.
             for frame_idx in range(full_scaled_coords.shape[0]):
                 all_coords.append(full_scaled_coords[frame_idx])
-                all_box_vectors.append(final_scaled_box_vecs[frame_idx])
+                all_box_vectors.append(scaled_box_vecs[frame_idx])
 
-    # Create expanded scale factors for the result
+    # Create expanded scale factors for the result.
     if coords.ndim == 2:
         expanded_scale_factors = scale_factors
     else:
