@@ -1,4 +1,4 @@
-"""System creation functions for tensor systems and force fields."""
+"""System creation functions for tensor systems and forcefields."""
 
 from typing import Optional
 
@@ -14,7 +14,8 @@ def create_system_from_smiles(
     forcefield_name: str = "openff-2.0.0.offxml",
     charge_assignment_callback: Optional[callable] = None,
 ) -> tuple[smee.TensorSystem, smee.TensorForceField, list[smee.TensorTopology]]:
-    """Create a tensor system from SMILES strings.
+    """
+    Create a tensor system from SMILES strings.
 
     Parameters
     ----------
@@ -29,22 +30,24 @@ def create_system_from_smiles(
     -------
     tuple[smee.TensorSystem, smee.TensorForceField, list[smee.TensorTopology]]
         The tensor system, force field, and list of topologies.
-
-    Examples
-    --------
-    >>> system, ff, topos = create_system_from_smiles(
-    ...     ["CCO", "O"],  # Ethanol and water
-    ...     [100, 500],    # 100 ethanol, 500 water
-    ... )
     """
     force_field = ForceField(forcefield_name, load_plugins=True)
-
     mols = [Molecule.from_smiles(smiles) for smiles in smiles_list]
+
+    # Optionally assign charges using the provided callback.
     if charge_assignment_callback is not None:
         for mol in mols:
             charge_assignment_callback(mol)
-    interchanges = [Interchange.from_smirnoff(force_field, [mol]) for mol in mols]
 
+    # Create an Interchange for each molecule, then convert to tensor format.
+    interchanges = [
+        Interchange.from_smirnoff(
+            force_field,
+            [mol],
+            charge_from_molecules=[mol] if charge_assignment_callback else None,
+        )
+        for mol in mols
+    ]
     tensor_forcefield, topologies = smee.converters.convert_interchange(interchanges)
     tensor_system = smee.TensorSystem(topologies, nmol_list, is_periodic=True)
 
@@ -62,10 +65,12 @@ def create_composite_system(
     dict[str, smee.TensorSystem],
     ForceField,
 ]:
-    """Create a composite system from multiple system configurations.
+    """
+    Create a composite system from multiple system configurations.
 
-    Builds a shared force field and individual tensor systems for
-    multi-system training.
+    Notes
+    -----
+    The forcefield will be created from the combined set of molecules across all systems, so it is shared.
 
     Parameters
     ----------
@@ -84,51 +89,28 @@ def create_composite_system(
         - composite_topologies: All topologies
         - all_tensor_systems: Dict mapping names to individual systems
         - force_field: Original OpenFF force field
-
-    Examples
-    --------
-    >>> config = [
-    ...     {"name": "ethanol", "components": [{"smiles": "CCO", "nmol": 200}]},
-    ...     {"name": "water", "components": [{"smiles": "O", "nmol": 1000}]},
-    ... ]
-    >>> ff, system, topos, systems, off_ff = create_composite_system(config)
     """
+    # Get all smiles and nmol values.
+    all_smiles = [
+        comp["smiles"] for system in systems_config for comp in system["components"]
+    ]
+    all_nmols = [
+        comp["nmol"] for system in systems_config for comp in system["components"]
+    ]
+
+    # Create the composite system using the shared forcefield and topologies.
+    composite_tensor_system, composite_tensor_forcefield, composite_topologies = (
+        create_system_from_smiles(
+            all_smiles, all_nmols, forcefield_name, charge_assignment_callback
+        )
+    )
+
+    # Create the force field instance.
     force_field = ForceField(forcefield_name, load_plugins=True)
 
-    # Collect all molecules
-    composite_mols = [
-        Molecule.from_smiles(comp["smiles"])
-        for system in systems_config
-        for comp in system["components"]
-    ]
-
-    if charge_assignment_callback is not None:
-        for mol in composite_mols:
-            charge_assignment_callback(mol)
-
-    composite_interchanges = [
-        Interchange.from_smirnoff(
-            force_field=force_field,
-            topology=[mol],
-            charge_from_molecules=[mol] if charge_assignment_callback else None,
-        )
-        for mol in composite_mols
-    ]
-
-    composite_tensor_forcefield, composite_topologies = (
-        smee.converters.convert_interchange(composite_interchanges)
-    )
-
-    composite_tensor_system = smee.TensorSystem(
-        composite_topologies,
-        [comp["nmol"] for system in systems_config for comp in system["components"]],
-        is_periodic=True,
-    )
-
-    # Create individual tensor systems
+    # Create individual tensor systems by slicing the shared topologies.
     all_tensor_systems = {}
     idx_counter = 0
-
     for system in systems_config:
         n_comps = len(system["components"])
         system_topologies = composite_topologies[idx_counter : idx_counter + n_comps]

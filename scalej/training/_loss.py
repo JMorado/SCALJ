@@ -2,7 +2,9 @@
 
 from typing import Any
 
+import datasets
 import descent.train
+import descent.utils.loss
 import openmm.unit
 import smee
 import smee.utils
@@ -42,21 +44,21 @@ def _prepare_entry_data(
     EntryData
         Prepared entry data with normalized energies.
     """
-    mixture_id = entry["mixture_id"]
+    id = entry["id"]
     n_conformers = len(entry["energy"])
 
-    # Load and reshape tensors
+    # Load and reshape tensors.
     energy_ref = entry["energy"].to(device)
     forces_ref = entry["forces"].reshape(n_conformers, -1, 3).to(device)
     coords = entry["coords"].reshape(n_conformers, -1, 3).to(device)
     box_vectors = entry["box_vectors"].reshape(n_conformers, 3, 3).to(device)
 
-    # Get system
-    system = tensor_systems[mixture_id].to(device)
+    # Get system.
+    system = tensor_systems[id].to(device)
     n_mols = sum(system.n_copies)
     n_atoms = coords.shape[1]
 
-    # Normalize energies and forces by number of molecules
+    # Normalize energies and forces by number of molecules.
     energy_ref = energy_ref / n_mols
     forces_ref = forces_ref / n_mols
 
@@ -88,7 +90,7 @@ def _compute_kbt(temperature: float) -> float:
     return (
         openmm.unit.AVOGADRO_CONSTANT_NA
         * openmm.unit.BOLTZMANN_CONSTANT_kB
-        * temperature
+        * (temperature * openmm.unit.kelvin)
     ).value_in_unit(openmm.unit.kilocalories_per_mole)
 
 
@@ -119,8 +121,7 @@ def _compute_conformer_weights(
     n_conformers = len(energy_ref)
     n_atoms = entry_data.n_atoms
 
-    # Apply energy cutoff filter
-    # This uses the global minimum energy conformer to define the cutoff
+    # Apply energy cutoff filter.
     mask = torch.ones(n_conformers, dtype=torch.bool, device=device)
     if config.energy_cutoff is not None:
         energy_ref_min = energy_ref.min()
@@ -132,11 +133,11 @@ def _compute_conformer_weights(
     if n_valid == 0:
         raise ValueError("No valid conformers after applying energy cutoff filter.")
 
-    # Compute weights for valid conformers
+    # Compute weights for valid conformers.
     energy_ref_valid = energy_ref[valid_indices]
     weights = torch.ones(n_valid, device=device)
 
-    # Compute reference offset
+    # Compute reference offset.
     ref_idx = -1
     min_idx = energy_ref.argmin().item()
     if config.reference.lower() == "mean":
@@ -145,7 +146,8 @@ def _compute_conformer_weights(
         ref_idx = min_idx
         energy_ref_0 = energy_ref[ref_idx].detach()
     elif config.reference.lower() == "infinite":
-        # We assume that the infinite separation (r->inf) idx is the last one
+        # We assume that the infinite separation (r->inf) idx is the last one.
+        # TODO: Is this always true? Should we allow specifying this index in the dataset?
         ref_idx = len(energy_ref) - 1
         energy_ref_0 = energy_ref[ref_idx].detach()
     elif config.reference.lower() == "none":
@@ -154,14 +156,14 @@ def _compute_conformer_weights(
     else:
         raise NotImplementedError(f"Unknown reference mode: {config.reference}")
 
-    # Compute weights for valid conformers
-    # We use relative energies to avoid numerical issues
+    # Compute weights for valid conformers.
+    # We use relative energies to avoid numerical issues.
     if config.weighting_method == "boltzmann":
         kb_t = _compute_kbt(config.weighting_temperature)
         e_rel = energy_ref_valid - energy_ref_valid.min()
         weights = torch.exp(-e_rel / kb_t)
     elif config.weighting_method == "mixed":
-        # Boltzmann weights for conformers below the minimum index, uniform above
+        # Boltzmann weights for conformers below the minimum index, uniform above.
         kb_t = _compute_kbt(config.weighting_temperature)
         min_valid_idx = (valid_indices == min_idx).nonzero(as_tuple=True)[0].item()
         e_rel = energy_ref_valid - energy_ref_valid[min_valid_idx]
@@ -171,14 +173,14 @@ def _compute_conformer_weights(
             torch.ones(n_valid, device=device),
         )
 
-    # Normalize weights to sum to 1
+    # Normalize weights to sum to 1.
     weights = (weights / weights.sum()).detach()
 
-    # Expand weights for forces
+    # Expand weights for forces.
     weights_forces = weights.view(-1, 1, 1).expand(n_valid, n_atoms, 3)
     weights_forces = (weights_forces / weights_forces.sum()).detach()
 
-    # Compute variances for normalization
+    # Compute variances for normalization.
     energy_ref_shifted = energy_ref_valid - energy_ref_0
     forces_ref_valid = forces_ref[valid_indices]
     energy_var = torch.var(energy_ref_shifted).detach()
@@ -281,7 +283,7 @@ def _compute_batch_energies(
                 system, force_field, coords_batch[i], box_vectors_batch[i]
             )
         )
-    return torch.stack(energies)
+    return torch.stack(energies).squeeze(-1)
 
 
 def _compute_batch_forces(
@@ -361,10 +363,10 @@ def _process_conformer_batch(
     force_field = trainable.to_force_field(params.abs()).to(device)
     ff_dtype = force_field.potentials[0].parameters.dtype
 
-    # Get batch weights with correct dtype
+    # Get batch weights with correct dtype.
     batch_weights = conf_weights.weights[batch_start:batch_end].to(dtype=ff_dtype)
 
-    # Prepare batch data with proper dtype matching
+    # Prepare batch data with proper dtype matching.
     coords_batch = smee.utils.tensor_like(
         entry_data.coords[batch_indices], force_field.potentials[0].parameters
     ).requires_grad_(True)
@@ -374,29 +376,29 @@ def _process_conformer_batch(
     energy_ref_batch = entry_data.energy_ref[batch_indices].to(dtype=ff_dtype)
     forces_ref_batch = entry_data.forces_ref[batch_indices].to(dtype=ff_dtype)
 
-    # Compute energies
+    # Compute energies.
     energy_pred_batch = _compute_batch_energies(
         entry_data.system, force_field, coords_batch, box_vectors_batch
     )
     energy_pred_batch = energy_pred_batch / entry_data.n_mols
 
-    # Compute forces
+    # Compute forces.
     if config.compute_forces:
         forces_pred_batch = _compute_batch_forces(energy_pred_batch, coords_batch)
     else:
         forces_pred_batch = None
 
-    # Apply reference offset
+    # Apply reference offset.
     energy_ref_shifted = energy_ref_batch - conf_weights.energy_ref_0
     energy_pred_shifted = energy_pred_batch - energy_pred_0
 
-    # Compute batch contributions
+    # Compute batch contributions.
     energy_diff = energy_pred_shifted - energy_ref_shifted
 
-    # Energy: weighted SSE contribution
+    # Energy: weighted SSE contribution.
     batch_weighted_energy_sse = torch.sum(batch_weights * energy_diff**2)
 
-    # Forces: weighted SSE contribution
+    # Forces: weighted SSE contribution.
     if config.compute_forces:
         batch_weights_forces = conf_weights.weights_forces[batch_start:batch_end].to(
             dtype=ff_dtype
@@ -406,8 +408,7 @@ def _process_conformer_batch(
     else:
         batch_weighted_force_sse = torch.zeros(1, device=device)
 
-    # Combine energy and force losses for gradient computation
-    # Weights already sum to 1 so no division by n_valid needed
+    # Combine energy and force losses for gradient computation.
     batch_energy_loss = batch_weighted_energy_sse / conf_weights.energy_var
     if config.compute_forces:
         batch_force_loss = batch_weighted_force_sse / conf_weights.forces_var
@@ -424,7 +425,7 @@ def _process_conformer_batch(
     )
     batch_grad = batch_grad.detach()
 
-    # Compute d(loss)/d(energy_pred_0) for chain rule correction
+    # Compute d(loss)/d(energy_pred_0) for chain rule correction.
     # dL/dE_{0,pred} = -2 * w_E * sum_i(w_i * diff_i) / var_E
     dloss_d_pred0 = (
         -2.0
@@ -571,7 +572,7 @@ def get_losses(
     tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
         Tuple of (total_loss, energy_loss, force_loss, grad).
     """
-    # Build config from parameters
+    # Build config from parameters.
     config = LossConfig(
         energy_weight=energy_weight,
         force_weight=force_weight,
@@ -582,10 +583,10 @@ def get_losses(
         compute_forces=compute_forces,
     )
 
-    # Prepare entry data
+    # Prepare entry data.
     entry_data = _prepare_entry_data(entry, tensor_systems, device)
 
-    # Compute weights and filter conformers
+    # Compute weights and filter conformers.
     conf_weights = _compute_conformer_weights(entry_data, config, device)
 
     if conf_weights is None:
@@ -596,7 +597,7 @@ def get_losses(
 
     n_valid = len(conf_weights.valid_indices)
 
-    # Compute reference offset gradient for "min" or "infinite" reference
+    # Compute reference offset gradient for "min" or "infinite" reference.
     if config.reference.lower() in ["min", "infinite"]:
         ref_offset_grad = _compute_reference_gradient(
             params, trainable, entry_data, conf_weights.reference_idx, device
@@ -608,13 +609,13 @@ def get_losses(
     else:
         raise ValueError(f"Unknown reference mode: {config.reference}")
 
-    # Initialize accumulators
+    # Initialize accumulators.
     total_weighted_energy_sse = torch.zeros(1, device=device)
     total_weighted_force_sse = torch.zeros(1, device=device)
     total_dloss_d_energy_pred_0 = torch.zeros(1, device=device)
     accumulated_grad = None
 
-    # Process conformers in batches
+    # Process conformers in batches.
     n_batches = (n_valid + conformer_batch_size - 1) // conformer_batch_size
     for batch_start in tqdm(
         range(0, n_valid, conformer_batch_size),
@@ -636,19 +637,19 @@ def get_losses(
             device=device,
         )
 
-        # Accumulate gradient
+        # Accumulate gradient.
         if accumulated_grad is None:
             accumulated_grad = batch_result.grad
         else:
             accumulated_grad = accumulated_grad + batch_result.grad
 
-        # Accumulate d(loss)/d(energy_pred_0) for chain rule
+        # Accumulate d(loss)/d(energy_pred_0) for chain rule.
         if ref_offset_grad is not None:
             total_dloss_d_energy_pred_0 = (
                 total_dloss_d_energy_pred_0 + batch_result.dloss_d_pred0
             )
 
-        # Accumulate loss contributions
+        # Accumulate loss contributions.
         total_weighted_energy_sse = (
             total_weighted_energy_sse + batch_result.weighted_energy_sse
         )
@@ -656,12 +657,12 @@ def get_losses(
             total_weighted_force_sse + batch_result.weighted_force_sse
         )
 
-    # Apply reference offset gradient correction
+    # Apply reference offset gradient correction.
     accumulated_grad = _apply_reference_gradient_correction(
         accumulated_grad, total_dloss_d_energy_pred_0, ref_offset_grad
     )
 
-    # Compute final losses
+    # Compute final losses.
     total_loss, total_energy_loss, total_force_loss = _aggregate_losses(
         total_weighted_energy_sse=total_weighted_energy_sse,
         total_weighted_force_sse=total_weighted_force_sse,
@@ -672,3 +673,104 @@ def get_losses(
     )
 
     return total_loss, total_energy_loss, total_force_loss, accumulated_grad
+
+
+def to_scalej_closure(
+    trainable: descent.train.Trainable,
+    dataset: datasets.Dataset,
+    tensor_systems: dict[str, smee.TensorSystem],
+    config: LossConfig,
+    conformer_batch_size: int = 8,
+    device: str = "cuda",
+    shuffle: bool = True,
+) -> descent.utils.loss.ClosureFn:
+    """
+    Return a descent-compatible ClosureFn wrapping the SCALeJ energy/force loss.
+
+    Parameters
+    ----------
+    trainable : descent.train.Trainable
+        Trainable object mapping flat parameters to the force field.
+    dataset : datasets.Dataset
+        SCALeJ training dataset (entries with 'id', 'coords', 'energy', ...).
+    tensor_systems : dict[str, smee.TensorSystem]
+        Tensor systems keyed by mixture ID.
+    config : LossConfig
+        Loss configuration (reference mode, weights, cutoffs, etc.).
+    conformer_batch_size : int
+        Number of conformers to process per batch within each entry.
+    device : str
+        Device ('cpu' or 'cuda').
+    shuffle : bool
+        Whether to shuffle dataset iteration order on each call.
+
+    Returns
+    -------
+    ClosureFn
+        ``(x, compute_gradient, compute_hessian) -> (loss, grad | None, None)``
+
+        Note: Hessian is always ``None``. SCALeJ's gradient is accumulated
+        manually across conformer batches and cannot be recomputed as a full
+        Hessian without holding the entire graph in memory. Use Adam or pass
+        the closure only to ``train_from_closure`` (which uses Adam).
+
+    Examples
+    --------
+    >>> from descent.targets import dimers
+    >>> from descent.utils.loss import combine_closures
+    >>>
+    >>> scalej_closure = to_scalej_closure(trainable, dataset, tensor_systems, config)
+    >>> dimer_closure  = dimers.default_closure(trainable, topologies, dimer_dataset)
+    >>>
+    >>> combined = combine_closures(
+    ...     {"scalej": scalej_closure, "dimers": dimer_closure},
+    ...     weights={"scalej": 1.0, "dimers": 0.5},
+    ...     verbose=True,
+    ... )
+    """
+
+    def closure_fn(
+        x: torch.Tensor,
+        compute_gradient: bool,
+        compute_hessian: bool,  # noqa: ARG001 — not supported, always returns None
+    ) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor | None]:
+        n_entries = len(dataset)
+        indices = (
+            torch.randperm(n_entries).tolist() if shuffle else list(range(n_entries))
+        )
+
+        total_loss = torch.zeros(1, device=device)
+        accumulated_grad: torch.Tensor | None = None
+
+        for entry_idx in indices:
+            entry = dataset[entry_idx]
+            entry = {
+                k: v.to(device) if hasattr(v, "to") else v for k, v in entry.items()
+            }
+
+            loss, _e_loss, _f_loss, grad = get_losses(
+                x,
+                trainable,
+                entry,
+                tensor_systems,
+                conformer_batch_size=conformer_batch_size,
+                energy_weight=config.energy_weight,
+                force_weight=config.force_weight,
+                reference=config.reference,
+                energy_cutoff=config.energy_cutoff,
+                weighting_method=config.weighting_method,
+                weighting_temperature=config.weighting_temperature,
+                device=device,
+                compute_forces=config.compute_forces,
+            )
+
+            total_loss = total_loss + loss
+
+            if compute_gradient:
+                accumulated_grad = (
+                    grad if accumulated_grad is None else accumulated_grad + grad
+                )
+
+        return total_loss.detach(), accumulated_grad, None
+
+    return closure_fn

@@ -1,4 +1,4 @@
-"""Data models for SCALeJ API."""
+"""Data types for SCALeJ."""
 
 import dataclasses
 
@@ -92,6 +92,7 @@ class TrainingResult:
     trained_parameters: torch.Tensor
     energy_losses: list[float]
     force_losses: list[float]
+    combined_losses: list[float] | None = dataclasses.field(default=None)
 
 
 @dataclasses.dataclass

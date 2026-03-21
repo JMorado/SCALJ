@@ -9,10 +9,10 @@ import openmm.unit
 import smee.mm
 from tqdm import tqdm
 
-from ..models import TrajectoryFrames
+from ..types import TrajectoryFrames
 
 
-def run_md_simulation(
+def run_simulation_smee(
     tensor_system: smee.TensorSystem,
     tensor_forcefield: smee.TensorForceField,
     output_path: Path | str,
@@ -26,10 +26,7 @@ def run_md_simulation(
     save_pdb: bool = True,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
-    Run classical MD simulation with equilibration and production phases.
-
-    Performs energy minimization, NVT equilibration, NPT equilibration,
-    and production dynamics, saving trajectory frames to a DCD file.
+    Run classical MD simulation with equilibration and production phases using smee.
 
     Parameters
     ----------
@@ -60,23 +57,12 @@ def run_md_simulation(
     -------
     tuple[np.ndarray, np.ndarray]
         Initial coordinates and box vectors.
-
-    Examples
-    --------
-    >>> import smee
-    >>> coords, box = run_md_simulation(
-    ...     tensor_system, tensor_forcefield,
-    ...     "trajectory.dcd",
-    ...     n_production_steps=100_000
-    ... )
     """
+    beta = 1.0 / (openmm.unit.MOLAR_GAS_CONSTANT_R * temperature)
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Compute beta for tensor reporter
-    beta = 1.0 / (openmm.unit.MOLAR_GAS_CONSTANT_R * temperature)
-
-    # Equilibration configurations
+    # Equilibration configuration.
     equilibrate_config = [
         smee.mm.MinimizationConfig(),
         smee.mm.SimulationConfig(
@@ -93,7 +79,7 @@ def run_md_simulation(
         ),
     ]
 
-    # Production configuration
+    # Production configuration.
     production_config = smee.mm.SimulationConfig(
         temperature=temperature,
         pressure=pressure,
@@ -101,14 +87,11 @@ def run_md_simulation(
         timestep=timestep,
     )
 
-    # Generate initial coordinates
     initial_coords, box_vectors = smee.mm.generate_system_coords(
         tensor_system, tensor_forcefield
     )
 
-    # Set up reporters
     reporters = []
-
     if save_pdb:
         pdb_reporter_file = output_path.parent / f"trajectory_{output_path.stem}.pdb"
         pdb_reporter = openmm.app.PDBReporter(
@@ -133,7 +116,44 @@ def run_md_simulation(
     return initial_coords, box_vectors
 
 
-def load_trajectory_frames(
+def run_simulation_omm(
+    simulation: openmm.app.Simulation,
+    coords: np.ndarray,
+    box_vectors: np.ndarray,
+    n_steps: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Run OpenMM simulation.
+
+    Parameters
+    ----------
+    simulation : openmm.app.Simulation
+        Configured OpenMM simulation.
+    coords : np.ndarray
+        Initial coordinates in OpenMM-compatible units.
+    box_vectors : np.ndarray
+        Box vectors (3x3 array).
+    n_steps : int
+        Number of simulation steps to run.
+
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray]
+        Final coordinates and box vectors.
+    """
+    simulation.context.setPeriodicBoxVectors(*box_vectors)
+    simulation.context.setPositions(coords)
+    simulation.step(n_steps)
+
+    # Get final state.
+    state = simulation.context.getState(getPositions=True)
+    final_coords = state.getPositions(asNumpy=True)
+    final_box_vectors = state.getPeriodicBoxVectors(asNumpy=True)
+
+    return final_coords, final_box_vectors
+
+
+def load_trajectory_frames_smee(
     trajectory_path: Path | str,
     n_frames: int = 1,
     from_end: bool = True,
@@ -153,17 +173,6 @@ def load_trajectory_frames(
     -------
     TrajectoryFrames
         Container with coordinates, box vectors, and frame count.
-
-    Raises
-    ------
-    ValueError
-        If trajectory has fewer frames than requested.
-
-    Examples
-    --------
-    >>> frames = load_trajectory_frames("trajectory.dcd", n_frames=10)
-    >>> frames.coords.shape
-    (10, 100, 3)  # 10 frames, 100 atoms, 3 dimensions
     """
     coords_list = []
     box_vectors_list = []
@@ -185,7 +194,7 @@ def load_trajectory_frames(
             f"{total_frames} frames. Please reduce n_frames."
         )
 
-    # Select frames
+    # Select frames.
     if from_end:
         selected_coords = coords_list[-n_frames:]
         selected_box_vectors = box_vectors_list[-n_frames:]
@@ -194,11 +203,11 @@ def load_trajectory_frames(
         selected_box_vectors = box_vectors_list[:n_frames]
 
     if n_frames == 1:
-        # Return single frame without batch dimension
+        # Return single frame without batch dimension.
         coords_array = selected_coords[0].detach().cpu().numpy()
         box_vectors_array = selected_box_vectors[0].detach().cpu().numpy()
     else:
-        # Return multiple frames with batch dimension
+        # Return multiple frames with batch dimension.
         coords_array = np.stack(
             [c.detach().cpu().numpy() for c in selected_coords], axis=0
         )
@@ -211,28 +220,3 @@ def load_trajectory_frames(
         box_vectors=box_vectors_array,
         n_frames=n_frames,
     )
-
-
-def generate_initial_coords(
-    tensor_system: smee.TensorSystem,
-    tensor_forcefield: smee.TensorForceField,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Generate initial coordinates for a system using SMEE packmol.
-
-    Parameters
-    ----------
-    tensor_system : smee.TensorSystem
-        The molecular system.
-    tensor_forcefield : smee.TensorForceField
-        The force field.
-
-    Returns
-    -------
-    tuple[np.ndarray, np.ndarray]
-        Initial coordinates and box vectors.
-
-    Examples
-    --------
-    >>> coords, box = generate_initial_coords(tensor_system, tensor_forcefield)
-    """
-    return smee.mm.generate_system_coords(tensor_system, tensor_forcefield)

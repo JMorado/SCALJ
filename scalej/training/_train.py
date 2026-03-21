@@ -2,12 +2,13 @@
 
 import datasets
 import descent.train
+import descent.utils.loss
 import smee
 import torch
 from loguru import logger
 from tqdm import tqdm
 
-from ..models import TrainingResult
+from ..types import TrainingResult
 from ._loss import get_losses
 from ._types import LossConfig, ReferenceMode, WeightingMethod
 
@@ -83,16 +84,16 @@ def _run_epoch(
     """
     n_entries = len(dataset)
 
-    # Initialize epoch accumulators
+    # Initialize epoch accumulators.
     epoch_loss = torch.zeros(1, device=device)
     epoch_energy_loss = torch.zeros(1, device=device)
     epoch_force_loss = torch.zeros(1, device=device)
     accumulated_grad = None
 
-    # Shuffle dataset indices
+    # Shuffle dataset indices.
     shuffled_indices = torch.randperm(n_entries).tolist()
 
-    # Process each entry
+    # Process each entry.
     for entry_idx in tqdm(
         shuffled_indices,
         total=n_entries,
@@ -103,7 +104,7 @@ def _run_epoch(
         entry = dataset[entry_idx]
         entry = {k: v.to(device) if hasattr(v, "to") else v for k, v in entry.items()}
 
-        # Compute loss and gradient for this entry
+        # Compute loss and gradient for this entry.
         entry_loss, entry_energy_loss, entry_force_loss, entry_grad = get_losses(
             params,
             trainable,
@@ -120,13 +121,13 @@ def _run_epoch(
             compute_forces=config.compute_forces,
         )
 
-        # Accumulate gradient
+        # Accumulate gradient.
         if accumulated_grad is None:
             accumulated_grad = entry_grad
         else:
             accumulated_grad = accumulated_grad + entry_grad
 
-        # Accumulate losses
+        # Accumulate losses.
         epoch_loss += entry_loss
         epoch_energy_loss += entry_energy_loss
         epoch_force_loss += entry_force_loss
@@ -202,12 +203,12 @@ def train_parameters(
     >>> result.energy_losses[-1]  # Final energy loss
     0.0023
     """
-    # Initialize training
+    # Initialize training.
     initial_params, params, optimizer = _initialize_training(
         trainable, learning_rate, device
     )
 
-    # Build config
+    # Build config.
     config = LossConfig(
         energy_weight=energy_weight,
         force_weight=force_weight,
@@ -236,12 +237,12 @@ def train_parameters(
             verbose=verbose,
         )
 
-        # Update parameters
+        # Update parameters.
         params.grad = accumulated_grad
         optimizer.step()
         optimizer.zero_grad()
 
-        # Record losses
+        # Record losses.
         avg_energy_loss = epoch_energy_loss.item() / n_entries
         avg_force_loss = epoch_force_loss.item() / n_entries
         avg_total_loss = epoch_loss.item() / n_entries
@@ -262,4 +263,90 @@ def train_parameters(
         trained_parameters=params.abs(),
         energy_losses=energy_losses,
         force_losses=force_losses,
+        combined_losses=total_losses,
+    )
+
+
+def train_from_closure(
+    trainable: descent.train.Trainable,
+    closure_fn: descent.utils.loss.ClosureFn,
+    n_epochs: int = 100,
+    learning_rate: float = 0.01,
+    device: str = "cuda",
+    verbose: bool = True,
+) -> TrainingResult:
+    """
+    Train using a pre-built closure function (e.g. from ``combine_closures``).
+
+    Parameters
+    ----------
+    trainable : descent.train.Trainable
+        Trainable object with parameters to optimize.
+    closure_fn : ClosureFn
+        A callable ``(x, compute_gradient, compute_hessian) -> (loss, grad, hessian)``.
+        Typically built with ``to_scalej_closure``, ``combine_closures``,
+        or ``dimers.default_closure``.
+    n_epochs : int
+        Number of training epochs.
+    learning_rate : float
+        Learning rate for the Adam optimizer.
+    device : str
+        Compute device for parameters.
+    verbose : bool
+        Whether to log per-epoch loss.
+
+    Returns
+    -------
+    TrainingResult
+        Training results. ``energy_losses`` and ``force_losses`` are empty lists
+        because individual target losses are not separately tracked here;
+        use ``verbose=True`` in ``combine_closures`` for per-target breakdown.
+
+    Examples
+    --------
+    >>> from scalej.training import to_scalej_closure, train_from_closure, LossConfig
+    >>> from descent.targets import dimers
+    >>> from descent.utils.loss import combine_closures
+    >>>
+    >>> config = LossConfig(energy_weight=1.0, force_weight=1.0, reference="min")
+    >>> scalej_closure = to_scalej_closure(trainable, dataset, tensor_systems, config)
+    >>> dimer_closure  = dimers.default_closure(trainable, topologies, dimer_dataset)
+    >>>
+    >>> combined = combine_closures(
+    ...     {"scalej": scalej_closure, "dimers": dimer_closure},
+    ...     weights={"scalej": 1.0, "dimers": 0.5},
+    ...     verbose=True,
+    ... )
+    >>> result = train_from_closure(trainable, combined, n_epochs=100)
+    """
+    initial_params, params, optimizer = _initialize_training(
+        trainable, learning_rate, device
+    )
+
+    total_losses = []
+
+    for epoch in range(n_epochs):
+        loss, grad, _ = closure_fn(params, compute_gradient=True, compute_hessian=False)
+
+        params.grad = grad
+        optimizer.step()
+        optimizer.zero_grad()
+
+        total_losses.append(loss.item())
+
+        if verbose:
+            parts = [f"Epoch {epoch}: total_loss={loss.item():.4e}"]
+            per_target = getattr(closure_fn, "last_losses", None)
+            if per_target:
+                parts.extend(f"{k}={v:.4e}" for k, v in per_target.items())
+            logger.info(" | ".join(parts))
+
+    # We don't track energy and force losses separately here.
+    # The total combined loss is given in combined_losses.
+    return TrainingResult(
+        initial_parameters=initial_params,
+        trained_parameters=params.abs(),
+        energy_losses=[],
+        force_losses=[],
+        combined_losses=total_losses,
     )

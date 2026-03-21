@@ -7,10 +7,10 @@ import torch
 from loguru import logger
 from tqdm import tqdm
 
-from ..models import TrainingResult
+from ..types import TrainingResult
 from ._loss import get_losses
-from ._types import LossConfig, ReferenceMode, WeightingMethod
 from ._train import _initialize_training
+from ._types import LossConfig, ReferenceMode, WeightingMethod
 
 
 def _worker_fn_ddp(
@@ -79,8 +79,8 @@ def _worker_fn_ddp(
         pbar = tqdm(entry_indices, desc=f"GPU {rank}", leave=False)
         for idx in pbar:
             entry = dataset[idx]
-            mixture_id = entry.get("mixture_id", f"entry_{idx}")
-            pbar.set_description(f"GPU {rank}: {mixture_id}")
+            id = entry.get("id", f"entry_{idx}")
+            pbar.set_description(f"GPU {rank}: {id}")
             entry = {
                 k: v.to(device) if hasattr(v, "to") else v for k, v in entry.items()
             }
@@ -201,13 +201,6 @@ def train_parameters_ddp(
     -------
     TrainingResult
         Training results including initial/final parameters and loss history.
-
-    Examples
-    --------
-    >>> result = train_parameters_ddp(
-    ...     trainable, dataset, tensor_systems,
-    ...     n_gpus=4, n_epochs=100, conformer_batch_size=4
-    ... )
     """
     import io as _io
     import threading

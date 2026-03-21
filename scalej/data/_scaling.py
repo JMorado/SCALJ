@@ -3,7 +3,7 @@
 import numpy as np
 import smee
 
-from ..models import ScalingResult
+from ..types import ScalingResult
 
 
 def generate_scale_factors(

@@ -1,16 +1,16 @@
 """Prediction functions for energies and forces."""
 
 import logging
+
 import datasets
 import smee
 import smee.utils
 import torch
 from tqdm import tqdm
 
-from ..models import PredictionResult
+from ..types import PredictionResult
 from ._loss import _compute_kbt
 from ._types import ReferenceMode, WeightingMethod
-
 
 log = logging.getLogger(__name__)
 
@@ -54,12 +54,6 @@ def predict_energies_forces(
     -------
     PredictionResult
         Predicted and reference energies, forces, weights, and masks.
-
-    Examples
-    --------
-    >>> result = predict_energies_forces(
-    ...     dataset, force_field, systems, reference="mean"
-    ... )
     """
     energy_ref_all = []
     energy_pred_all = []
@@ -70,7 +64,7 @@ def predict_energies_forces(
     all_mask_idxs = []
 
     for entry in tqdm(dataset, desc="Predicting", leave=False):
-        mixture_id = entry["mixture_id"]
+        id = entry["id"]
 
         energy_ref = entry["energy"].to(device)
         forces_ref = entry["forces"].reshape(len(energy_ref), -1, 3).to(device)
@@ -95,9 +89,9 @@ def predict_energies_forces(
             .requires_grad_(False)
         )
 
-        system = tensor_systems[mixture_id].to(device)
+        system = tensor_systems[id].to(device)
 
-        # Compute energies and forces using one-by-one pattern to save memory
+        # Compute energies and forces using one-by-one pattern to save memory.
         energies = []
         forces = []
         for coord, box_vector in tqdm(
@@ -106,7 +100,7 @@ def predict_energies_forces(
             desc="Predicting energies/forces",
             leave=False,
         ):
-            # Compute energy and its gradient (force) for a single conformer
+            # Compute energy and its gradient (force) for a single conformer.
             try:
                 e = smee.compute_energy(system, force_field, coord, box_vector)
                 g = torch.autograd.grad(e, coord, allow_unused=True)[0]
@@ -119,12 +113,12 @@ def predict_energies_forces(
         energy_pred = torch.stack(energies)
         forces_pred = torch.stack(forces)
 
-        # Normalize energies by the number of molecules
+        # Normalize energies by the number of molecules.
         n_mols = sum(system.n_copies)
         energy_ref = energy_ref / n_mols
         energy_pred = energy_pred / n_mols
 
-        # Determine reference energy offset
+        # Determine reference energy offset.
         if reference.lower() == "mean":
             energy_ref_0 = energy_ref.mean()
             energy_pred_0 = energy_pred.mean()
@@ -141,20 +135,20 @@ def predict_energies_forces(
         else:
             raise NotImplementedError(f"invalid reference energy {reference}")
 
-        # Filtering mask
+        # Filtering mask.
         mask = torch.ones_like(energy_ref, dtype=torch.bool)
         if energy_cutoff is not None:
             energy_ref_min = energy_ref.min()
             mask = (energy_ref - energy_ref_min) <= energy_cutoff
 
-        # Apply weights
+        # Apply weights.
         weights = torch.ones_like(energy_ref)
         if weighting_method == "boltzmann":
             kb_t = _compute_kbt(weighting_temperature)
             e_rel = energy_ref - energy_ref.min()
             weights = torch.exp(-e_rel / kb_t)
 
-        # Apply mask to everything
+        # Apply mask to everything.
         mask_idx = torch.where(mask)[0]
 
         energy_ref_masked = energy_ref[mask_idx]
@@ -164,7 +158,7 @@ def predict_energies_forces(
         forces_pred_masked = forces_pred[mask_idx]
         weights_masked = weights[mask_idx]
 
-        # Expand weights for forces
+        # Expand weights for forces.
         n_atoms = forces_ref.shape[1]
         weights_forces_masked = weights_masked.repeat_interleave(n_atoms)
 
@@ -198,7 +192,7 @@ def predict_energies_forces(
     weights_forces_all = weights_forces_all.unsqueeze(1)
     weights_forces_all = smee.utils.tensor_like(weights_forces_all, forces_pred_all)
 
-    # Normalize weights
+    # Normalize weights.
     weights_energy_sum = weights_all.sum()
     if weights_energy_sum > 0:
         weights_all = weights_all / weights_energy_sum

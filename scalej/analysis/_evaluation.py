@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import smee
 
-from ..models import BenchmarkResult, EvaluationMetrics, PredictionResult
+from ..types import BenchmarkResult, EvaluationMetrics, PredictionResult
 
 log = logging.getLogger(__name__)
 
@@ -359,7 +359,7 @@ def save_evaluation_parquets(
 
     scale_factor_map: dict[str, list[float]] = {
         mid: group["scale_factors"].tolist()
-        for mid, group in raw_df.groupby("mixture_id", sort=False)
+        for mid, group in raw_df.groupby("id", sort=False)
     }
 
     rows = []
@@ -372,7 +372,7 @@ def save_evaluation_parquets(
     f_pred_np = prediction.forces_pred.detach().cpu().numpy()
 
     for i, entry in enumerate(dataset):
-        mixture_id = entry["mixture_id"]
+        id = entry["id"]
         mask_idxs = prediction.mask_idxs[i]
         n_conf_filtered = len(mask_idxs)
 
@@ -381,7 +381,7 @@ def save_evaluation_parquets(
 
         n_conf_raw = len(entry["energy"])
         n_atoms = len(entry["forces"]) // (n_conf_raw * 3)
-        scale_factors = scale_factor_map.get(mixture_id, [])
+        scale_factors = scale_factor_map.get(id, [])
 
         e_ref = e_ref_np[energy_offset : energy_offset + n_conf_filtered]
         e_pred = e_pred_np[energy_offset : energy_offset + n_conf_filtered]
@@ -398,7 +398,7 @@ def save_evaluation_parquets(
             conf_idx = int(mask_idxs[j].item())
             rows.append(
                 {
-                    "mixture_id": mixture_id,
+                    "id": id,
                     "conformer_idx": conf_idx,
                     "scale_factor": (
                         scale_factors[conf_idx] if scale_factors else None

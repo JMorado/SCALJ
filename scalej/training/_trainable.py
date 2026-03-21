@@ -40,35 +40,31 @@ def create_trainable(
     -------
     descent.train.Trainable
         Trainable object for optimization.
-
-    Examples
-    --------
-    >>> trainable = create_trainable(force_field, parameters_cols=["epsilon", "sigma"])
     """
     parameters_scales = parameters_scales or {}
     parameters_limits = parameters_limits or {}
     attributes_scales = attributes_scales or {}
     attributes_limits = attributes_limits or {}
 
-    # Create trainable parameter config for vdW parameters
+    # Create trainable parameter config for vdW parameters.
     vdw_parameter_config = descent.train.ParameterConfig(
         cols=parameters_cols,
         scales=parameters_scales,
         limits=parameters_limits,
     )
 
-    # Create trainable attribute config for vdW attributes
+    # Create trainable attribute config for vdW attributes.
     vdw_attribute_config = descent.train.AttributeConfig(
         cols=attributes_cols,
         scales=attributes_scales,
         limits=attributes_limits,
     )
 
-    # Ensure vdW parameters require gradients
+    # Ensure vdW parameters require gradients.
     vdw_potential = force_field.potentials_by_type["vdW"]
     vdw_potential.parameters.requires_grad = True
 
-    # Create trainable object
+    # Create trainable object.
     trainable = descent.train.Trainable(
         force_field=force_field.to(device),
         parameters={"vdW": vdw_parameter_config},
