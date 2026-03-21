@@ -2,6 +2,7 @@
 
 import copy
 import json
+import pickle
 from pathlib import Path
 from typing import Any
 
@@ -54,9 +55,21 @@ def save_object(obj: Any, file_path: Path | str) -> None:
     torch.save(obj, file_path)
 
 
-# Backward-compatible aliases
-load_pickle = load_object
-save_pickle = save_object
+def load_pickle(file_path: Path | str) -> Any:
+    """Load an object from a standard pickle file."""
+    file = Path(file_path)
+    if not file.exists():
+        raise FileNotFoundError(f"File not found: {file}")
+    with open(file, "rb") as f:
+        return pickle.load(f)
+
+
+def save_pickle(obj: Any, file_path: Path | str) -> None:
+    """Save an object to a standard pickle file."""
+    file_path = Path(file_path)
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(file_path, "wb") as f:
+        pickle.dump(obj, f)
 
 
 def save_dataset(dataset: datasets.Dataset, path: Path | str) -> None:
